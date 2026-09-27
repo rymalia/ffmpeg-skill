@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- feat: opt-in Apple VideoToolbox encoding. `--hw`/`--no-hw` on every re-encoding tool and `export.py`; `FFMPEG_SKILL_HW=1` makes it the default for everything but `export.py`'s delivery presets; `render.py`/`batch.py --hw` make it explicit for every stage. h264/hevc (HDR Main10 with the source's tags and HDR10 side data)/prores; AV1 stays on SVT-AV1. CRF→`-q:v` fitted by SSIM on an M4 Max; BT.709 tags through `h264_metadata`/`hevc_metadata` so FFmpeg ≥7.1 never converts an untagged source; Apple Silicon only; a job the GPU refuses is re-encoded on the CPU. Every result names its `encoder`; `hw` says what was asked and what ran. The render cache key includes the GPU setting. `doctor --json` gains `hw`.
+- feat: Parakeet speech engines. `parakeet-mlx` and `parakeet.cpp` (`parakeet-cli` + a `.gguf`) for `caption.py --transcribe` and `silence.py --filler --transcribe`; `--engine` / `FFMPEG_SKILL_ASR_ENGINE` pick one, `auto` runs Parakeet for English speech (explicit `--language`, else whisper.cpp's language detector, else assumed English) and Whisper otherwise. Results carry `transcription` (engine, model, routing); `silence.py`'s `filler.source` is `parakeet:ENGINE` for them. New optional contract capability `external:parakeet`. `caption.py --model` defaults to `large-v3-turbo`.
+
 - docs(SKILL.md): MCP line said "the other 42" stay callable (it is the other 30, as `mcp/server.py` and the tests say); `--fit-size off` described by what it does rather than "1.16 behaviour" (also in `caption.py --help`); workflow heading drops "always" (steps 0 and 8 are conditional). From a prompt audit.
 
 ## 2.3.1

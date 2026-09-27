@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""Tests for Apple VideoToolbox encoding (--hw) and the Parakeet speech engines (2.4).
+
+    python3 tests/test_accel.py          # this group alone
+    python3 tests/test_all.py            # every group
+
+The pure-logic cases run everywhere. The real VideoToolbox encodes run only on Apple Silicon with
+an ffmpeg that lists the encoders; the Parakeet engines are driven through fake binaries on a
+PATH that holds nothing else, so these cases never depend on what the host has installed.
+"""
+import argparse
+import json
+import os
+import platform
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _fixtures import MediaFixtures, OUT, ROOT, SCRIPTS, script, sh  # noqa: E402
+from _common import STATE, add_common, apply_common, ffmpeg_encoders  # noqa: E402
+from _common import asr, decision, runner  # noqa: E402
+
+
+def _vt_here() -> bool:
+    return (platform.system() == "Darwin" and platform.machine() == "arm64"
+            and {"h264_videotoolbox", "hevc_videotoolbox"} <= ffmpeg_encoders())
+
+
+def _parse(argv, codec=True, orchestrator=False):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("input", nargs="?")
+    ap.add_argument("-o", "--output")
+    if codec and not orchestrator:
+        ap.set_defaults(crf=18)
+    add_common(ap, codec=codec)
+    if orchestrator:
+        runner.add_hw_orchestrator_args(ap)
+    args = ap.parse_args(argv)
+    apply_common(args)
+    return args
+
+
+class HwResolutionTests(unittest.TestCase):
+    """--hw / --no-hw / $FFMPEG_SKILL_HW resolve the same way in every tool."""
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        for k in (runner.HW_ENV, runner.HW_FORCED_ENV):
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        self._env.stop()
+        STATE.reset()
+
+    def test_off_by_default(self):
+        _parse(["in.mp4"])
+        self.assertFalse(STATE.hw)
+        self.assertIsNone(STATE.hw_source)
+
+    def test_env_turns_it_on_and_no_hw_turns_it_off(self):
+        os.environ[runner.HW_ENV] = "1"
+        _parse(["in.mp4"])
+        self.assertEqual((STATE.hw, STATE.hw_source), (True, "env"))
+        _parse(["in.mp4", "--no-hw"])
+        self.assertEqual((STATE.hw, STATE.hw_source), (False, "flag"))
+
+    def test_export_style_tools_ignore_the_env_default(self):
+        """A delivery preset (codec=False: export.py) is on the GPU only when asked explicitly."""
+        os.environ[runner.HW_ENV] = "1"
+        _parse(["in.mp4"], codec=False)
+        self.assertFalse(STATE.hw)
+        _parse(["in.mp4", "--hw"], codec=False)
+        self.assertEqual((STATE.hw, STATE.hw_source), (True, "flag"))
+
+    def test_orchestrator_flag_reaches_export_style_children_as_explicit(self):
+        """render.py/batch.py --hw is an explicit choice for every stage, export.py included;
+        their --no-hw overrides a machine default for every stage."""
+        _parse(["p.json", "--hw"], orchestrator=True)
+        self.assertEqual((os.environ.get(runner.HW_ENV), os.environ.get(runner.HW_FORCED_ENV)), ("1", "1"))
+        _parse(["in.mp4"], codec=False)          # a child export.py
+        self.assertEqual((STATE.hw, STATE.hw_source), (True, "flag"))
+        _parse(["p.json", "--no-hw"], orchestrator=True)
+        _parse(["in.mp4"])                       # a child fit.py
+        self.assertEqual((STATE.hw, STATE.hw_source), (False, "flag"))
+
+    def test_tools_without_an_encoder_never_pick_it_up(self):
+        os.environ[runner.HW_ENV] = "1"
+        ap = argparse.ArgumentParser()
+        ap.add_argument("input")
+        add_common(ap)                           # no crf default: an analysis tool
+        args = ap.parse_args(["in.mp4"])
+        self.assertFalse(hasattr(args, "hw"))
+        apply_common(args)
+        self.assertFalse(STATE.hw)
+
+
+class VtArgsTests(unittest.TestCase):
+    def tearDown(self):
+        STATE.reset()
+
+    def test_quality_mapping_is_monotonic_and_bounded(self):
+        for codec in ("h264", "hevc"):
+            qs = [decision.vt_quality(codec, crf) for crf in range(0, 52)]
+            self.assertEqual(qs, sorted(qs, reverse=True))
+            self.assertTrue(all(1 <= q <= 100 for q in qs))
+        self.assertEqual(decision.vt_quality("h264", 18), 75)
+
+    def test_bt709_tags_never_go_through_the_filter_graph_on_71(self):
+        """On FFmpeg >= 7.1 the -colorspace output options insert a real matrix conversion on an
+        untagged source; VideoToolbox gets its tags from a bitstream filter instead."""
+        with mock.patch.object(decision, "ffmpeg_version", return_value=(9, 0)):
+            tags = decision._vt_bt709("h264")
+        self.assertEqual(tags[0], "-bsf:v")
+        self.assertNotIn("-colorspace", tags)
+        self.assertNotIn("-x264-params", tags)
+
+    def test_av1_and_an_intel_mac_stay_on_the_cpu_with_a_note(self):
+        STATE.hw = True
+        self.assertIsNone(decision._vt_args("av1", 30, None, True))
+        with mock.patch.object(decision, "hw_platform_reason", return_value="VideoToolbox constant-quality encoding needs Apple Silicon"):
+            cpu = ["-c:v", "libx264", "-crf", "18"]
+            self.assertEqual(decision._maybe_hw("h264", 18, None, True, cpu), cpu)
+        self.assertTrue(any("av1" in n for n in STATE.hw_notes))
+        self.assertTrue(any("Apple Silicon" in n for n in STATE.hw_notes))
+
+    def test_run_can_put_the_cpu_line_back(self):
+        STATE.hw_swaps = [(["-c:v", "h264_videotoolbox", "-q:v", "75"], ["-c:v", "libx264", "-crf", "18"])]
+        cmd = ["ffmpeg", "-i", "a.mp4", "-c:v", "h264_videotoolbox", "-q:v", "75", "out.mp4"]
+        self.assertEqual(runner._hw_fallback(cmd, STATE), ["ffmpeg", "-i", "a.mp4", "-c:v", "libx264", "-crf", "18", "out.mp4"])
+        self.assertIsNone(runner._hw_fallback(["ffmpeg", "-i", "a", "b"], STATE))
+
+    def test_export_preset_keeps_its_frame_rate_and_leaves_faststart_to_export(self):
+        STATE.hw = True
+        with mock.patch.object(decision, "hw_platform_reason", return_value=None), \
+                mock.patch.object(decision, "ffmpeg_encoders", return_value={"h264_videotoolbox"}):
+            vt = decision.hw_preset_video(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-profile:v", "high",
+                                           "-pix_fmt", "yuv420p", "-r", "30"], None)
+        self.assertEqual(vt[vt.index("-c:v") + 1], "h264_videotoolbox")
+        self.assertEqual(vt[vt.index("-r") + 1], "30")
+        self.assertNotIn("-movflags", vt)
+        self.assertNotIn("-preset", vt)
+
+    def test_render_cache_key_changes_with_the_gpu_setting(self):
+        """A VideoToolbox artifact is never served to a CPU run (and the other way round)."""
+        import render
+        with mock.patch.dict(os.environ, {runner.HW_ENV: "0"}):
+            os.environ.pop(runner.HW_FORCED_ENV, None)
+            cpu = render.cache_key("fit", "fit.py", ["--height", "720"], [])
+        with mock.patch.dict(os.environ, {runner.HW_ENV: "1"}):
+            gpu = render.cache_key("fit", "fit.py", ["--height", "720"], [])
+        with mock.patch.dict(os.environ, {runner.HW_ENV: "1", runner.HW_FORCED_ENV: "1"}):
+            forced = render.cache_key("fit", "fit.py", ["--height", "720"], [])
+        self.assertEqual(len({cpu, gpu, forced}), 3)
+
+
+class HwReviewRegressionTests(unittest.TestCase):
+    """Cases a review of the first --hw implementation found."""
+
+    def tearDown(self):
+        STATE.reset()
+
+    def _vt_ok(self):
+        return (mock.patch.object(decision, "hw_platform_reason", return_value=None),
+                mock.patch.object(decision, "ffmpeg_encoders", return_value={"h264_videotoolbox", "hevc_videotoolbox", "prores_videotoolbox"}))
+
+    def test_export_edits_to_a_vt_line_keep_the_fallback_findable(self):
+        """export.py strips -movflags from encoder_args()'s line; the swap must follow the edit."""
+        STATE.hw = True
+        a, b = self._vt_ok()
+        with a, b:
+            built = decision.encoder_args("hevc", 20, "medium", {"video": {"bt2020_or_hdr": True, "color_transfer": "smpte2084"}})
+        stripped = decision.strip_movflags(built)
+        decision.restate_last_swap(built, stripped)
+        cmd = ["ffmpeg", "-i", "in.mov"] + stripped + ["-movflags", "+faststart", "out.mp4"]
+        back = runner._hw_fallback(cmd, STATE)
+        self.assertIsNotNone(back)
+        self.assertIn("libx265", back)
+
+    def test_export_preset_fallback_is_tagged_like_a_cpu_run(self):
+        STATE.hw = True
+        a, b = self._vt_ok()
+        with a, b:
+            decision.hw_preset_video(["-c:v", "libx264", "-preset", "slow", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p"], None)
+        cpu = STATE.hw_swaps[-1][1]
+        self.assertTrue("-x264-params" in cpu or "-colorspace" in cpu, cpu)
+
+    def test_vt_tags_never_depend_on_the_version_guess(self):
+        """A git build of 7.1 reads as (7, 0); the VideoToolbox tag path must not change with it."""
+        for v in ((6, 1), (7, 0), (7, 1), (9, 0)):
+            with mock.patch.object(decision, "ffmpeg_version", return_value=v):
+                self.assertEqual(decision._vt_bt709("hevc")[0], "-bsf:v")
+
+    def test_encoder_report_keeps_the_encode_behind_a_later_copy(self):
+        import importlib
+        emit = importlib.import_module("_common.emit")
+        STATE.commands = ["ffmpeg -i a -c:v h264_videotoolbox -q:v 75 b.mp4", "ffmpeg -i b.mp4 -c:v copy -af loudnorm c.mp4"]
+        STATE.hw, STATE.hw_source = True, "flag"
+        rep = emit._encoder_report(STATE)
+        self.assertEqual(rep["encoder"], "h264_videotoolbox")
+        self.assertTrue(rep["hw"]["used"])
+        STATE.commands = ["ffmpeg -ss 1 -i a.mp4 -c copy -t 2 b.mp4"]
+        self.assertEqual(emit._encoder_report(STATE)["encoder"], "copy")
+        STATE.commands = []  # batch.py: the stages are child processes it does not record
+        self.assertIsNone(emit._encoder_report(STATE)["hw"]["used"])
+
+    def test_parakeet_cpp_runs_with_only_an_explicit_model(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"HOME": d}):
+            os.environ.pop("PARAKEET_CPP_MODEL", None)
+            gguf = Path(d) / "tdt-0.6b-v3-f16.gguf"
+            gguf.write_bytes(b"GGUF")
+            which = mock.Mock(which=lambda n: "/x/parakeet-cli" if n == "parakeet-cli" else None)
+            self.assertFalse(asr._parakeet_available("parakeet.cpp", which))
+            self.assertTrue(asr._parakeet_available("parakeet.cpp", which, str(gguf)))
+            self.assertEqual(asr._parakeet_model_for("parakeet.cpp", str(gguf), "de"), str(gguf))
+            # --engine auto must see it too, not only a forced --engine parakeet.cpp
+            self.assertEqual(asr.parakeet_route("auto", "en", "a.wav", which, subprocess)[0], [])
+            self.assertEqual(asr.parakeet_route("auto", "en", "a.wav", which, subprocess, str(gguf))[0], list(asr.PARAKEET_ENGINES))
+
+    def test_hw_dry_run_runs_no_ffmpeg(self):
+        """The dry-run promise: --hw's encoder check reads the build through ffprobe, never ffmpeg."""
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "calls.log"
+            fake = Path(d) / "ffmpeg"
+            fake.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\nexit 1\n")
+            fake.chmod(0o755)
+            for tool in ("ffprobe",):
+                os.symlink(shutil.which(tool), Path(d) / tool)
+            env = dict(os.environ, PATH=f"{d}{os.pathsep}/usr/bin{os.pathsep}/bin")
+            runner._ENCODERS = None
+            proc = subprocess.run([sys.executable, str(SCRIPTS / "fit.py"), str(OUT / "source.mp4"), "--height", "360", "--hw",
+                                   "--dry-run", "--json", "-o", str(Path(d) / "o.mp4")], env=env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
+
+
+@unittest.skipUnless(_vt_here(), "VideoToolbox encoders need Apple Silicon and an ffmpeg that lists them")
+class VtEncodeTests(MediaFixtures):
+    """Real VideoToolbox encodes, probed."""
+
+    def test_hw_encode_reports_itself_and_keeps_an_untagged_source_unconverted(self):
+        src = OUT / "vt_untagged.mkv"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:d=1",
+           "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "0", src)
+        out = OUT / "vt_fit.mp4"
+        doc = json.loads(script("fit.py", src, "--height", "360", "--hw", "--json", "-o", out).stdout)
+        self.assertEqual(doc["encoder"], "h264_videotoolbox")
+        self.assertEqual(doc["hw"], {"requested": True, "source": "flag", "used": True, "notes": []})
+        v = doc["probe"]["video"]
+        self.assertEqual((v["color_space"], v["color_primaries"], v["color_transfer"]), ("bt709", "bt709", "bt709"))
+        neutral = "setparams=colorspace=unknown:color_primaries=unknown:color_trc=unknown"
+        proc = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(out), "-i", str(src), "-lavfi",
+                               f"[0:v]{neutral}[a];[1:v]{neutral}[b];[a][b]psnr", "-f", "null", "-"],
+                              stderr=subprocess.PIPE, text=True)
+        psnr = float(proc.stderr.split("average:")[1].split()[0])
+        self.assertGreater(psnr, 40, "the BT.709 tag turned into a colour conversion (~24 dB)")
+
+    def test_hw_hdr10_side_data_survives(self):
+        """PQ + mastering-display + content-light metadata come through hevc_videotoolbox."""
+        src = OUT / "vt_hdr10_md.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:d=1",
+           "-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1", "-x265-params",
+           "log-level=error:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400",
+           "-bsf:v", "hevc_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9", src)
+        out = OUT / "vt_hdr10_out.mp4"
+        doc = json.loads(script("fit.py", src, "--height", "360", "--hw", "--json", "-o", out).stdout)
+        self.assertEqual(doc["encoder"], "hevc_videotoolbox")
+        self.assertEqual(doc["probe"]["video"]["color_transfer"], "smpte2084")
+        side = sh("ffprobe", "-v", "error", "-select_streams", "v", "-read_intervals", "%+#1", "-show_frames",
+                  "-show_entries", "frame_side_data=side_data_type", out).stdout
+        self.assertIn("Mastering display metadata", side)
+        self.assertIn("Content light level metadata", side)
+
+    def test_a_job_videotoolbox_refuses_falls_back_to_the_cpu_and_says_so(self):
+        """H.264 on VideoToolbox stops at 4096 wide; an 8K frame is re-encoded on x264, reported."""
+        out = OUT / "vt_8k.mp4"
+        doc = json.loads(script("fit.py", self.src, "--width", "8192", "--height", "4608", "--hw", "--fast",
+                                "--json", "-o", out).stdout)
+        self.assertEqual(doc["encoder"], "libx264")
+        self.assertFalse(doc["hw"]["used"])
+        self.assertTrue(any("VideoToolbox refused" in n for n in doc["hw"]["notes"]), doc["hw"])
+
+    def test_export_preset_needs_an_explicit_hw(self):
+        env = dict(os.environ, FFMPEG_SKILL_HW="1")
+        doc = json.loads(script("export.py", self.src, "--preset", "x", "--json", "-o", OUT / "vt_x_env.mp4", env=env).stdout)
+        self.assertEqual(doc["encoder"], "libx264")
+        doc = json.loads(script("export.py", self.src, "--preset", "x", "--hw", "--json", "-o", OUT / "vt_x_hw.mp4").stdout)
+        self.assertEqual(doc["encoder"], "h264_videotoolbox")
+        self.assertEqual(round(doc["probe"]["video"]["fps"]), 30)
+
+
+# ------------------------------------------------------------------------------ Parakeet
+
+MLX_DOC = {"text": "So um we start. Here.", "sentences": [
+    {"text": "So um we start.", "start": 0.2, "end": 1.6, "tokens": [
+        {"text": " So", "start": 0.2, "end": 0.4}, {"text": " u", "start": 0.5, "end": 0.6}, {"text": "m", "start": 0.6, "end": 0.7},
+        {"text": " ", "start": 0.7, "end": 0.8}, {"text": "we", "start": 0.9, "end": 1.0}, {"text": " start", "start": 1.1, "end": 1.5},
+        {"text": ".", "start": 1.5, "end": 1.6}]},
+    {"text": "Here.", "start": 2.0, "end": 2.4, "tokens": [{"text": " Here", "start": 2.0, "end": 2.3}, {"text": ".", "start": 2.3, "end": 2.4}]}]}
+CPP_DOC = {"text": "So um we start. Here.", "frame_sec": 0.08, "words": [
+    {"w": "So", "start": 0.2, "end": 0.4, "conf": 0.99}, {"w": "um", "start": 0.5, "end": 0.7, "conf": 0.9},
+    {"w": "we", "start": 0.9, "end": 1.0, "conf": 0.99}, {"w": "start.", "start": 1.1, "end": 1.6, "conf": 0.99},
+    {"w": "Here.", "start": 2.0, "end": 2.4, "conf": 0.99}]}
+
+
+class ParakeetParsingTests(unittest.TestCase):
+    def test_mlx_subword_tokens_become_words(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump(MLX_DOC, fh)
+        words = asr._words_from_parakeet_mlx_json(fh.name)
+        self.assertEqual([w["word"] for w in words], ["So", "um", "we", "start.", "Here."])
+        self.assertEqual((words[1]["start"], words[1]["end"]), (0.5, 0.7))
+        self.assertEqual(asr._cues_from_parakeet_mlx_json(fh.name), [(0.2, 1.6, "So um we start."), (2.0, 2.4, "Here.")])
+        os.unlink(fh.name)
+
+    def test_cpp_words_and_the_cues_built_from_them(self):
+        words = asr._words_from_parakeet_cpp_json(json.dumps(CPP_DOC))
+        self.assertEqual(len(words), 5)
+        self.assertEqual(asr.cues_from_words(words), [(0.2, 1.6, "So um we start."), (2.0, 2.4, "Here.")])
+
+    def test_cues_split_on_a_pause_and_on_length(self):
+        words = [{"word": "a", "start": 0.0, "end": 0.2}, {"word": "b", "start": 1.5, "end": 1.7}]
+        self.assertEqual(len(asr.cues_from_words(words)), 2)
+        long = [{"word": f"w{i}", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(20)]
+        self.assertTrue(all(e - s <= asr.CUE_MAX_SECONDS for s, e, _ in asr.cues_from_words(long)))
+
+
+class ParakeetRoutingTests(unittest.TestCase):
+    def test_auto_routes_by_language(self):
+        which = mock.Mock(side_effect=lambda n: "/x/" + n if n == "parakeet-mlx" else None)
+        sh_ = mock.Mock(which=which)
+        self.assertEqual(asr.parakeet_route("auto", "en", "a.wav", sh_, subprocess)[0], list(asr.PARAKEET_ENGINES))
+        self.assertEqual(asr.parakeet_route("auto", "fr", "a.wav", sh_, subprocess)[0], [])
+        self.assertEqual(asr.parakeet_route("whisper.cpp", None, "a.wav", sh_, subprocess)[0], [])
+        self.assertEqual(asr.parakeet_route("parakeet.cpp", "de", "a.wav", sh_, subprocess)[0], ["parakeet.cpp"])
+        with mock.patch.object(asr, "detect_language", return_value="ja"):
+            self.assertEqual(asr.parakeet_route("auto", None, "a.wav", sh_, subprocess)[0], [])
+        with mock.patch.object(asr, "detect_language", return_value=None):
+            eng, route = asr.parakeet_route("auto", None, "a.wav", sh_, subprocess)
+            self.assertEqual(eng, list(asr.PARAKEET_ENGINES))
+            self.assertIn("assumed English", route["routing"])
+
+    def test_english_only_model_refuses_another_language(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PARAKEET_MODEL", None)
+            with self.assertRaises(SystemExit):
+                asr._parakeet_model_for("parakeet-mlx", None, "fr")
+            self.assertIn("v3", asr._parakeet_model_for("parakeet-mlx", "mlx-community/parakeet-tdt-0.6b-v3", "fr"))
+            self.assertEqual(asr._parakeet_model_for("parakeet-mlx", "large-v3-turbo", "en"), asr.PARAKEET_MLX_DEFAULT_MODEL)
+
+    def test_unknown_engine_in_the_environment_is_refused(self):
+        with mock.patch.dict(os.environ, {asr.ASR_ENGINE_ENV: "vosk"}):
+            with self.assertRaises(SystemExit):
+                asr.requested_engine(None)
+
+
+class ParakeetEngineTests(MediaFixtures):
+    """caption.py / silence.py drive fake Parakeet binaries on a PATH that holds only them and ffmpeg."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.bin = Path(tempfile.mkdtemp(prefix="ffskill_fakeasr_"))
+        for tool in ("ffmpeg", "ffprobe", "fc-match", "fc-list"):
+            if shutil.which(tool):
+                os.symlink(shutil.which(tool), cls.bin / tool)
+        mlx = """
+            import json, os, sys
+            a = sys.argv[1:]; out = a[a.index("--output-dir") + 1]; os.makedirs(out, exist_ok=True)
+            json.dump(DOC, open(os.path.join(out, os.path.splitext(os.path.basename(a[0]))[0] + ".json"), "w"))
+            """
+        cpp = """
+            import json, sys
+            assert sys.argv[1] == "transcribe" and "--json" in sys.argv
+            print(json.dumps(DOC))
+            """
+        for name, body, doc in (("parakeet-mlx", mlx, MLX_DOC), ("parakeet-cli", cpp, CPP_DOC)):
+            p = cls.bin / name
+            p.write_text(f"#!{sys.executable}\nDOC = {doc!r}\n" + textwrap.dedent(body))
+            p.chmod(p.stat().st_mode | stat.S_IXUSR)
+        cls.gguf = cls.bin / "tdt-0.6b-v2-f16.gguf"
+        cls.gguf.write_bytes(b"GGUF")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.bin, ignore_errors=True)
+        super().tearDownClass()
+
+    def env(self, **extra):
+        e = dict(os.environ, PATH=f"{self.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", PARAKEET_CPP_MODEL=str(self.gguf))
+        e.update(extra)
+        return e
+
+    def test_caption_auto_picks_parakeet_for_english_and_reports_it(self):
+        doc = json.loads(script("caption.py", self.src, "--transcribe", "--language", "en", "--fast", "--json",
+                                "-o", OUT / "pk_auto.mp4", env=self.env()).stdout)
+        self.assertEqual(doc["transcription"]["engine"], "parakeet-mlx")
+        self.assertEqual(doc["transcription"]["model"], asr.PARAKEET_MLX_DEFAULT_MODEL)
+        self.assertIn("So um we start.", (OUT / "pk_auto.srt").read_text())
+
+    def test_caption_engine_flag_and_env_pick_parakeet_cpp(self):
+        doc = json.loads(script("caption.py", self.src, "--transcribe", "--engine", "parakeet.cpp", "--fast", "--json",
+                                "-o", OUT / "pk_cpp.mp4", env=self.env()).stdout)
+        self.assertEqual(doc["transcription"]["engine"], "parakeet.cpp")
+        doc = json.loads(script("caption.py", self.src, "--transcribe", "--fast", "--json", "-o", OUT / "pk_cpp_env.mp4",
+                                env=self.env(FFMPEG_SKILL_ASR_ENGINE="parakeet.cpp")).stdout)
+        self.assertEqual(doc["transcription"]["engine"], "parakeet.cpp")
+
+    def test_caption_another_language_skips_parakeet(self):
+        proc = script("caption.py", self.src, "--transcribe", "--language", "fr", "--fast", "--json",
+                      "-o", OUT / "pk_fr.mp4", env=self.env(), expect_fail=True)
+        err = json.loads(proc.stdout)["error"]["message"]
+        self.assertIn("no local speech-to-text engine", err)
+
+    def test_silence_filler_words_from_parakeet(self):
+        doc = json.loads(script("silence.py", self.src, "--filler", "--transcribe", "--filler-list", "--json",
+                                "--engine", "parakeet.cpp", env=self.env()).stdout)
+        self.assertEqual(doc["filler"]["source"], "parakeet:parakeet.cpp")
+        self.assertEqual([r["word"] for r in doc["filler"]["removed"]], ["um"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

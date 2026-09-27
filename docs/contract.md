@@ -334,18 +334,24 @@ A project may now carry `"template"` (the name it was filled from) and `"frame":
 ## Capabilities
 
 Names: `ffmpeg`, `ffprobe`, `encoder:<name>`, `filter:<name>`, `bsf:<name>`,
-`external:whisper`. `capabilities.required` is the union of every tool's required list;
+`external:whisper`, `external:parakeet`. `capabilities.required` is the union of every tool's required list;
 `optional` the union of the conditional ones. With detection (the default)
 `available`, `missing` and `missing_optional` are added from `doctor`, which reads
 `ffmpeg -encoders / -filters / -bsfs` and looks for a local whisper. Pass `--static`
 to omit detection. Nothing from the environment other than those lists and the
-ffmpeg/ffprobe/python versions is printed; no environment variables, no paths.
+ffmpeg/ffprobe/python versions is printed; no environment variables, no paths (`doctor`'s
+`hw.default_on` is a boolean derived from `FFMPEG_SKILL_HW`, never its value).
 
 `external:whisper` is **optional** for two tools since 1.17: `caption.py`
 (`--transcribe`) and `silence.py` (`--filler --transcribe`). Neither requires
 it — both take a transcript the caller already has (`--srt`/`--words`), and
-both refuse with the same three install lines when asked to make one with no
+both refuse with the same install lines when asked to make one with no
 engine present. Whisper is never a dependency of this skill.
+`external:parakeet` (2.4) is the same kind of optional capability for the same two flags:
+parakeet-mlx, or parakeet-cli with a `.gguf` model it can find. Either engine family
+satisfies `--transcribe`; `--engine auto` (the default, or `FFMPEG_SKILL_ASR_ENGINE`) runs
+Parakeet for English speech and Whisper for every other language, and the result's
+`transcription` says which engine, model and routing decision produced the cues.
 
 `doctor` has three states per capability. `available` and `missing` come from a listing
 that was read; `unknown` means the listing that would prove the capability could not be
@@ -377,9 +383,11 @@ for tools that don't need `subtitles`/`drawtext`/`zscale`, but `caption.usable` 
 "parsed"|"unparsed"|"failed"|"missing", "present": [...]}`. It proves the build shipped the
 capability, not that the GPU/driver on this machine will accept a job (that needs a real
 encode, which this introspection never runs). No tool declares or requires a GPU encoder, so
-`gpu_encoders` never affects `ok` or any tool's `usable` — it exists purely so a caller can ask
-the same honest yes/no/unknown question about GPU support that filter/encoder detection already
-answers for everything else, without a tool here needing to use one.
+`gpu_encoders` never affects `ok` or any tool's `usable`. Since 2.4, `--hw` (and
+`FFMPEG_SKILL_HW=1`, which `export.py`'s delivery presets ignore) puts h264/hevc/prores encodes on
+VideoToolbox on Apple Silicon only; a job the GPU refuses is re-encoded on the CPU and said so in
+the result's `hw.notes`. `doctor`'s `hw` field is `{platform_ok, default_on}` — normalised
+booleans, never the environment value.
 
 `doctor`'s `fonts` field reports whether the default drawtext font (`caption.py`'s
 `--animate`/`--karaoke`, `graphics.py`'s templates — `BRAND_DEFAULTS["font"]`, `"DejaVu Sans"`)
@@ -490,7 +498,9 @@ Per-tool keys added in 1.17, all additive:
 | `filler`, `removed_seconds_total` | `silence.py --filler` | `{lang, source, engine, words, removed, removed_count, removed_seconds, removed_words, word_timings, list, warnings}`. The existing `removed_seconds` is unchanged in name and meaning — the seconds of *silence* removed, which is what it has always held — and `removed_seconds_total` is the additive sibling covering silence plus filler |
 | `jobs`, `jobs_requested`, `wall_seconds`, `item_seconds_total`, `timed_out` | `batch.py` | the parallelism actually applied and the number asked for, the batch's wall clock, the sum of the per-item times (so the speed-up can be quoted), and whether the shared timeout budget ran out. A timed-out item carries `"skipped": "timeout"` in its result row |
 | `timeline` | `render.py --export-timeline FILE` | `{format, rate, duration, frames, clips, transition, transition_frames, music, markers, notes, not_exported}`: the written timeline's own numbers (`rate` is exact, `"30000/1001"` for 29.97) and what the project asked for that an editor timeline cannot carry. Nothing is encoded (`commands: []`); `verified` means the file was written and reads back as its format (`verification` step `parse`) -- not that an editor opened it |
-| `cache` | `render.py --cache` | `{dir, ffmpeg, hits, misses, saved_seconds, entries}`, plus `would_hit` under `--dry-run`. The ffmpeg build banner, the skill version, the contract version, the forwarded flags (`--fast`, `--codec`, …) and the output's extension are all part of every key, so a cache is never reused across any of them — a `--fast` draft is never served to a run that did not ask for one |
+| `encoder`, `hw` | every re-encoding tool (2.4) | `encoder`: the video encoder the last command ran (after any GPU→CPU fallback), `copy` for a stream copy. `hw`, only when VideoToolbox was asked for: `{requested, source: flag\|env, used, notes}` — `used` is `true`/`false`, or `null` when the tool encoded nothing itself (`batch.py`, whose stages are child processes) |
+| `transcription` | `caption.py --transcribe`; inside `filler` for `silence.py --filler --transcribe` (2.4) | `{engine, model, language, routing, detected_language?}` |
+| `cache` | `render.py --cache` | `{dir, ffmpeg, hits, misses, saved_seconds, entries}`, plus `would_hit` under `--dry-run`. The ffmpeg build banner, the skill version, the contract version, the forwarded flags (`--fast`, `--codec`, …), the GPU setting (`FFMPEG_SKILL_HW` and whether `--hw`/`--no-hw` made it explicit) and the output's extension are all part of every key, so a cache is never reused across any of them — a `--fast` draft is never served to a run that did not ask for one |
 
 Per-tool keys added in 1.17.1, all additive:
 
