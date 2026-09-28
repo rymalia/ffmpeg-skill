@@ -336,9 +336,11 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
      codecs with no out-of-band configuration (`pcm_*`, `mp3`, `mp2`) or for an MPEG-TS output,
      where Annex B / ADTS carry it in-band. Anywhere else, a missing hash is a mismatch. So two
      WAV parts still match and keep their lossless copy join.
-   - **[R6] Join-level check:** after a copy join, if the output's duration differs from the
-     sum of the parts' measured durations by more than one frame (or 0.05 s for audio-only),
-     take the fallback.
+   - ~~**[R6] Join-level check**~~ **[R7: removed]**. A review reproduced it rejecting ordinary
+     keyframe-aligned lossless joins (HEVC, 25 fps, 4 B-frames). Each copied part's format *and*
+     stream durations include its own start offset, which the concat demuxer drops, so no sum of
+     them predicts the join. Measured off by 0.03–1.3 s across five source shapes. The signature
+     match is the guard. A regression test keeps a keyframe-aligned B-frame join a `copy`.
 4. **A safe join fallback [R4, redesigned in R5].** On any mismatch, or if the copy concat
    fails, **re-cut every segment from the source** in one filter graph. The parts are
    discarded. The fallback is a re-encode, so no segment keeps a lossless copy either way, and
@@ -377,6 +379,15 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
      concatenated incompatible parts, and the new one never takes parts at all.
    - A copy concat of matching parts isn't decode-checked. The signature match is the guard,
      and the fallback runs if the copy concat still fails.
+
+5. **[R7, found while implementing 3.4] The `--accurate` single-cut seek loses leading frames.**
+   `cut_one`'s re-encode uses `-ss T -i SRC`. The MP4 demuxer seeks by decode time, so for a T
+   inside the B-frame reorder delay before a keyframe, the seek lands *on* that keyframe. The
+   frames before it are lost: `-ss 9.9` on the keyint-60, 4-B-frame HEVC fixture began at 10.0,
+   dropping 3 frames. The join fallback already avoids this with its seek margin. Fix it in the
+   item 1/3 group with the same approach: `-ss (T − m) -i SRC -ss m -t d`, where the output-side
+   `-ss` discards the margin from both streams equally. Test: `--accurate --start 9.9 --end 10.1`
+   on the fixture gives 6 frames, and the first is source frame 297 (frame identity).
 
 **Tests.**
 - **Codec kept:** an SDR HEVC source with `--accurate` gives `hevc`, `hvc1` and BT.709.
@@ -421,8 +432,8 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
   error, and nothing is written.
 - **Chunking [R6]:** 40 segments of 0.2 s that force the fallback give 2 chunks, a clean decode,
   a frame count of `40 × 6` and a single video stream.
-- **Join-level check [R6, unit]:** a copy join whose probed duration is one second longer than
-  the sum of its parts takes the fallback. Probes are faked; no encode.
+- **Keyframe-aligned B-frame join stays a copy [R7]:** three keyframe-aligned segments of a
+  25 fps, 4-B-frame HEVC source give `mode: copy` and `segment_precision` all `packet`.
 - **Extradata rule [R6, unit]:** AAC without a hash on both sides into `.mp4` is a mismatch;
   into `.ts` it's equal; `pcm_s16le` without a hash is equal.
 - **Rotated source [R5]:** on the rotated fixture (`test_editing.py`'s `self.rot`), a mixed
@@ -514,4 +525,14 @@ basis. Unresolved:
 - Batch discards step documents (`batch.py:160`), and batch projects nest render documents.
 
 **Item 1 on `--segments`.** Edit-listed concat parts need decoded join-boundary tests before
-`make_zero` can be dropped there.
+`make_zero` can be dropped there. **[R7] Measured while implementing item 3:** today's
+lossless copy joins of `make_zero` parts are longer than their parts by about 0.05–0.13 s per
+boundary on B-frame sources (the concat demuxer offsets each part by its container duration,
+start offset included). That is a timing gap in the video at each join. This is the same work.
+
+**[R7] Item 3 edge cases from the Opus review (inferred, not reproduced):**
+- A segment that runs past the video's end on a source whose audio outlasts the video (and
+  isn't the last segment) gets a video gap before the next segment.
+- Under `--hw`, VideoToolbox could refuse one chunk of a chunked join. The CPU retry would then
+  make that chunk's signature differ, and the join would die instead of re-encoding
+  consistently.
