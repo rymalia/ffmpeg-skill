@@ -10,7 +10,7 @@ footage with the upstream skill). Item numbers follow that review.
   on item 6 and the item-4 roll-up. The user split the work into two phases.
 - **R3** (Phase 1 only), reviewed by Codex (gpt-6-sol, xhigh): REVISE, 1 critical / 4 major /
   1 minor. Most R2 findings were marked resolved.
-- **R4** (this version) folds in three things, marked **[R4]**:
+- **R4** folds in three things, marked **[R4]**:
   - every R3 finding;
   - a Codex test-quality audit of the planned tests: cut the redundant and tautological ones,
     move cheap checks to unit level, and add the missing cases;
@@ -19,58 +19,50 @@ footage with the upstream skill). Item numbers follow that review.
       B-frame reorder);
     - `ffprobe -show_data_hash sha256` reports a per-stream `extradata_hash`, which a stream copy
       preserves.
+- **R5** (this version) applies the eight findings of the Codex review of R4 (gpt-6-sol, xhigh:
+  REVISE), marked **[R5]**. It is grounded in four local measurements (FFmpeg 9.0.2, 2026-09-27,
+  on the HEVC fixture from item 1):
+  - **The edit list presents the first source frame with pts ≥ T.** T = 4.3 gave source frame
+    129 and T = 4.31 gave frame 130 (at 4.333 s); both decoded bit-identical to the source
+    frame.
+  - **The end overshoot is larger than R4 assumed.** A `-t 3` copy gave 94–95 frames, 4–5
+    over, with `bframes=4`.
+  - **A concat filter over the parts leaves a gap even after a `setpts` rebase.** The filter
+    starts each segment at the end of its longest stream. A `make_zero` copy part is the wrong
+    length for that: it carries keyframe pre-roll (2.4 s of video for a 2 s request) and an
+    audio tail (2.44 s). Both variants showed a 0.1 s hole at the join.
+  - **A join that re-cuts every segment from the source is exact.** Using per-segment input
+    `-ss/-t`, then `trim`/`atrim` and a `PTS-STARTPTS` rebase into `concat`, gave 120/120
+    frames, no pts gap, and V and A both 4.000 s. The boundary frames matched their source
+    frames at ~55 dB against 27–31 dB for their neighbours.
+  - **PCM has no `extradata_hash`**, confirmed on a `pcm_s16le` WAV.
 - **Phase 2**, a separate plan later: item 6 (timeout scaling) and the item-4 render/batch
   roll-up. Their carried findings are at the end. Item 5 is out of scope.
 
-## ⚠ R5 amendments still to apply (Codex review of R4, gpt-6-sol xhigh: REVISE)
+### How R5 answers the R4 review
 
-These are recorded at the session cutoff. **Apply them to the sections below before
-implementing.** Items A (Refactor A), 1-reporting, 2, 4 and 7 are mostly settled. The open
-problems are in **item 3's join mechanism** and in a few test oracles.
+| R4 finding | R5 resolution |
+|---|---|
+| 1. PCM has no extradata | `extradata_hash` is compared as a value, where "absent in both" counts as equal (item 3.3). An audio-only join is specified (`concat=n=N:v=0:a=1`) and tested. |
+| 2. The filter join needs a rebase | The fallback no longer joins the parts: it **re-cuts every segment from the source** (item 3.4). Each segment is trimmed to its exact duration and rebased, so there's no pre-roll, A/V offset or gap to repair. Continuity is tested by frame count and pts deltas. |
+| 3. Rotation, SAR, HDR | Every segment decodes from the same source with the same autorotation. Encoding goes through the same `encode_args` as a single `--accurate` cut, so geometry, SAR, HDR and tags follow the existing single-cut rules. `rotation`, `color_transfer` and `color_primaries` join the copy-concat signature. A test runs on the rotated fixture. |
+| 4. The lossy boundary oracle | A stdlib frame-identity helper (below). Exact `framemd5` is kept for stream-copy assertions only. The part-signature difference is asserted before a fixture is called a mismatch. |
+| 5. A computable `keyframe_snapped` | The rule is measured: the edit list presents the first source frame with pts ≥ T. It's tested with an off-grid T (item 1.2). |
+| 6. The 29.97 fixture | Pts are generated as `round(n × 20.02)` ticks. The file-start first delta gets a rule and a test (item 2.2). |
+| 7. Audio-lag tolerance | Both sides are decoded with the same decoder. The tolerance is ±48 samples (1 ms at 48 kHz), to be tightened once measured. |
+| 8. The mixed H.264/HEVC test | The fallback takes the source rather than the parts, so it can never concatenate an H.264 part with an HEVC part. The signature helper is unit-tested on prepared H.264 and HEVC parts (they must differ), and the integration mismatch test checks for a clean decode. |
 
-1. **[Critical, verified] PCM has no `extradata_hash`.** `ffprobe -show_data_hash sha256` on a
-   `pcm_s16le` WAV returns none, so "missing means incompatible" would push every multi-segment
-   WAV cut off its lossless copy join and into an undefined fallback.
-   - Make the extradata requirement codec-specific: compare it only for codecs that carry
-     extradata (AAC, H.264, HEVC, …).
-   - Specify and test an audio-only join: `concat=n=N:v=0:a=1`.
-2. **[Critical] The filter join needs a timestamp rebase.** The concat filter requires each
-   segment to start at 0. Without `setpts=PTS-STARTPTS` / `asetpts=PTS-STARTPTS`, Codex
-   measured frame PTS `0,1,4,5`, a gap at the join.
-   - Rebase each part's video and audio to a shared origin, preserving that part's measured A/V
-     offset.
-   - Check decoded continuity across the join (frame count and no PTS gap).
-3. **[Major] Rotation.** A copied part keeps a rotation display matrix, while a re-encoded part
-   is auto-rotated, so scaling to part 0's *coded* size distorts it.
-   - Normalise by **display** geometry (after autorotate) and define SAR handling.
-   - Also define HDR transfer, primaries, bit depth and output tags on the fallback.
-   - Add a mixed copy/re-encode join test on the existing rotated fixture
-     (`test_editing.py:742`).
-4. **[Major] A lossy fallback can't pass an exact `framemd5` boundary check.** Both parts are
-   re-encoded in the join.
-   - Use a frame-identity pattern (burn a frame-number `drawtext` into the fixture and OCR-free
-     compare via a per-frame colour code, or a bounded PSNR against the expected source frame).
-     Keep exact hashes for stream-copy assertions only.
-   - Assert that the two parts' signatures really differ before calling the fixture a
-     "guaranteed mismatch".
-5. **[Major] `keyframe_snapped` on the MP4 edit-list path needs a computable rule.** The output
-   probes can't tell which *source* frame became the first presented frame. Define the mapping,
-   for example: the presented first frame's source pts = the requested start snapped to the
-   frame grid, confirmed by a frame-identity check. Test it directly. (Codex agrees the `.mkv`
-   switch of `test_editing.py:91` is plausible.)
-6. **[Minor, verified arithmetic] The 29.97 fixture was wrong.** At a 1/600 time base,
-   30000/1001 is 20.02 ticks per frame: mostly 20-tick deltas with a 21 about every 50 frames,
-   *not* alternating 20/21 (that would be ~29.27 fps). Generate the rounded pts sequence
-   properly. Also add a case with an unusual **first** pts interval on an otherwise CFR stream,
-   and decide whether the classifier ignores the first delta.
-7. **[Minor] Audio-lag tolerance.** Decode the reference identically (same AAC priming
-   handling) and allow a small documented sample tolerance, not exactly 0.
-8. **[Minor] The mixed H.264/HEVC join test** must call the join helper with prepared parts.
-   With source-codec preservation in place, a single `cut.py --segments` call can no longer
-   produce that pair.
+**Frame-identity oracle [R5].** A test helper (in `tests/test_cut_copy.py`, shared by items 1
+and 3):
+- decode frames with `-vf scale=64:36,format=gray -f rawvideo` and compute PSNR in stdlib;
+- a frame "is" source frame *k* when *k* is its best match within ±5 frames, the PSNR is
+  ≥ 40 dB, and it leads the runner-up by ≥ 10 dB;
+- `testsrc2` changes on every frame (neighbours measure 27–31 dB), so the margin separates
+  adjacent frames;
+- a stream copy is also checked for exactness (99 dB, meaning an identical decode).
 
-**Suggested next step:** apply 1–8, run one short Codex pass focused on the join mechanism only,
-then implement in the order below.
+**Suggested next step:** one short Codex pass on item 3's R5 join, then implement in the order
+below.
 
 ## Constraints (all items)
 
@@ -159,8 +151,13 @@ for `--segments` (see Phase 2).
    - `stored_preroll_seconds` = `max(0, duration_ignoring_editlist − duration_presented)` for
      the video stream. It is `null` if either probe fails. On the HEVC fixture it measured
      5.433 − 5.067 = 0.367 s, which equals the negative-pts span.
-   - `keyframe_snapped`: on the edit-list path, true only if the presented start differs from
-     the request by more than one frame.
+   - `keyframe_snapped` **[R5, a computable rule]**:
+     - When `edit_list` is true it is **false**. The measured rule is that the edit list
+       presents the first source frame with pts ≥ T, which is within one frame of the request
+       by construction.
+     - When `edit_list` is false and the copy started more than one frame from T (for
+       example `.mkv`, which has no edit lists), it is true.
+     - It is only ever true on a stream copy.
    - `duration_delta_seconds`: unchanged in meaning (presented minus requested). It is now
      small and positive, the end overshoot.
    - Note, when `edit_list` is true: "N s of pre-roll stored, hidden by the MP4 edit list; a
@@ -176,13 +173,20 @@ for `--segments` (see Phase 2).
 **Tests** (new `tests/test_cut_copy.py`, on the HEVC fixture unless noted).
 - **First frame:** the output's decoded first frame equals the source frame at T (framemd5),
   with T on a frame boundary.
+- **Off-grid first frame [R5]:** with T = 4.31 (between frames 129 and 130), the first frame is
+  source frame **130**, pinning the pts ≥ T rule. This is the literal index, not a computed
+  one.
 - **Last frame [R4]:** the output's last presented frame equals the source frame at *its actual
-  presented timestamp*. That timestamp is read from the output, not computed as T + d. The
-  end overshoot is bounded separately: `0 ≤ output video duration − requested ≤ 4 frame
-  durations`.
-- **Audio lag [R4]:** a **non-periodic** audio track (`anoisesrc` with a fixed seed, mixed at a
-  low level with a chirp), so cross-correlation can't lock on a repeat. The lag is 0 samples
-  over a short window, computed in stdlib.
+  presented timestamp*. That timestamp is read from the output, not computed as T + d.
+- **End overshoot [R5]:** bounded separately as `0 ≤ output video duration − requested ≤ 6
+  frame durations`. The fixture has `bframes=4` and measured +4 to +5 frames at `-t 3`.
+- **Audio lag [R4, R5 tolerance]:**
+  - use a **non-periodic** audio track (`anoisesrc` with a fixed seed, mixed at a low level
+    with a chirp), so cross-correlation can't lock on a repeat;
+  - decode the source window and the output with the same decoder and settings (`-c:a aac`
+    priming handled identically, 48 kHz mono s16);
+  - the lag must be within **±48 samples (1 ms)**, computed in stdlib;
+  - record the measured value in the test's comment and tighten the bound to it plus a margin.
 - **Report fields:** `edit_list` true; `stored_preroll_seconds` ≈ 0.367 (within one frame);
   `keyframe_snapped` false; `mode` copy; `reencode_reason` `[]`; skew ≈ 0.
 - **Non-zero source start** (`-output_ts_offset 10`): the same decoded first-frame check, plus
@@ -226,6 +230,10 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
    - skip pts that are missing or non-finite;
    - sort (decode order puts B-frames out of sequence);
    - take consecutive deltas and drop zero deltas;
+   - **[R5]** in the window that begins at the file's first packet only, drop the **first**
+     delta. A container-start interval (an edit-list or priming artefact on the first frame) is
+     not evidence of variable timing. Every other delta counts, including the first delta of
+     later windows;
    - the tolerance is max(1 ms, one time-base tick + 1 µs).
 
    The result is one of:
@@ -250,7 +258,11 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
 **Tests.**
 - **Classifier unit tests with fixed timestamps, no encodes [R4]:**
   - exact 1/30 → `sampled_cfr`;
-  - 29.97 at time base 1/600 (alternating 20- and 21-tick deltas) → `sampled_cfr`;
+  - **[R5]** 29.97 at time base 1/600: pts = `round(n × 600 × 1001 / 30000)` ticks, which is
+    mostly 20-tick deltas with a 21 about every 50 frames (not alternating) → `sampled_cfr`.
+    The test asserts that the fixture's delta multiset has 21-tick deltas in it;
+  - **[R5]** an unusual first delta at the file start on an otherwise CFR stream →
+    `sampled_cfr`; the same unusual delta as the *second* delta → `vfr`;
   - **one dropped frame** (a single 2× delta) in one window → `vfr`;
   - jitter → `vfr`;
   - VFR only in the stretch between windows (the windows themselves are clean) → `sampled_cfr`,
@@ -298,22 +310,42 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
    copy preserves). Compare:
    - **stream order and types**, as an ordered list of `codec_type`;
    - video: codec, profile, pix_fmt, width, height, `r_frame_rate`, `time_base`, SAR,
-     **`extradata_hash`**;
+     **`extradata_hash`**, and **[R5]** `rotation`, `color_transfer` and `color_primaries`;
    - audio: codec, sample_rate, channels, `time_base`, `extradata_hash`.
-   - **Any missing field or failed probe counts as incompatible.** (FFmpeg's automatic concat
+   - **A failed probe, or a missing stream, counts as incompatible.** (FFmpeg's automatic concat
      conversion covers H.264-in-MP4 but not HEVC, so for the HEVC case this plan centres on,
      only an exact match is safe.)
-4. **A safe join fallback [R4].** On any mismatch, or if the copy concat fails:
-   - Re-encode through the **concat filter** with each part as its own input:
-     `ffmpeg -i p0 -i p1 … -filter_complex "[0:v][0:a][1:v][1:a]…concat=n=N:v=1:a=1[v][a]" -map "[v]" -map "[a]"`
-     plus `encode_args`.
-   - Before the concat filter, normalise each part's video with `scale` + `setsar` + `fps` to
-     the first part's values, and `aresample` the audio.
-   - Parts without audio are handled by `a=0` when none has audio, and refused with a clear
-     message when only some do (a rare case; a clear refusal beats a guess).
-   - This replaces the demuxer path at `:366`, which also fixes today's bug.
-   - Subtitle and data streams aren't carried into a re-encoded join (`dropped_non_av_streams:
-     true` when the source had any).
+   - **[R5] Fields are compared as values:** a field that's absent from *both* parts is equal,
+     and absent from only one is a mismatch. PCM carries no `extradata_hash`, so two WAV parts
+     still match and keep their lossless copy join. An H.264 or HEVC part that lost its
+     extradata no longer matches one that has it.
+4. **A safe join fallback [R4, redesigned in R5].** On any mismatch, or if the copy concat
+   fails, **re-cut every segment from the source** in one filter graph. The parts are
+   discarded. The fallback is a re-encode, so no segment keeps a lossless copy either way, and
+   re-cutting avoids having to repair parts that are the wrong length (the pre-roll and audio
+   tail measured above).
+   - One input per segment: `-ss <s_i> -t <d_i> -i SRC`. Input seeking with the default
+     `accurate_seek` decodes from the prior keyframe and discards frames up to `s_i`.
+   - Per segment: `[i:v]trim=duration=<d_i>,setpts=PTS-STARTPTS[v_i]` and
+     `[i:a]atrim=duration=<d_i>,asetpts=PTS-STARTPTS[a_i]`. Both streams are cut to the same
+     length, so the concat filter's longest-stream rule leaves no gap.
+   - `concat=n=N:v=V:a=A`:
+     - V = 1 when the source has video and the output isn't an audio extension;
+     - A = 1 when the source has audio;
+     - **audio-only: `concat=n=N:v=0:a=1`**, with `-vn` and the output extension's audio codec.
+   - Then `-sn -dn`, and `encode_args(meta, output, crf, preset)`: the same codec, CFR, HDR and
+     tag rules as a single `--accurate` cut, including item 3.1's source codec.
+   - Every segment decodes from the same source with the same autorotation, so rotation, SAR
+     and geometry are consistent by construction. The output is display-oriented with rotation
+     0, as the `--accurate` path already produces.
+   - **Reporting:** `concat_fallback` in the reasons; `reencoded` true; `mode` is not `copy`;
+     `segment_precision` is each segment's re-encoded precision (`frame` for video, `sample` or
+     `codec_frame` for audio); `keyframe_snapped` false; `dropped_non_av_streams: true` when
+     the source had any.
+   - This replaces the demuxer path at `:366`, which also fixes today's bug: that path
+     concatenated incompatible parts, and the new one never takes parts at all.
+   - A copy concat of matching parts isn't decode-checked. The signature match is the guard,
+     and the fallback runs if the copy concat still fails.
 
 **Tests.**
 - **Codec kept:** an SDR HEVC source with `--accurate` gives `hevc`, `hvc1` and BT.709.
@@ -330,13 +362,30 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
   - Before running it, check the fixture: the first segment's copy delta is below the chosen
     tolerance and the second's is above it.
   - Assert: `concat_fallback` is in the reasons, `reencoded` true, `mode` not copy, and
-    `segment_precision == ["packet", "frame"]`.
-  - Decoded boundary check: the output's frames on each side of the join match the source's
-    frames at the requested segment edges (framemd5, where the copied segment's edge is its
-    presented keyframe start).
-- **Mixed-codec join through the new filter path:** an H.264 part and an HEVC part (the exact
-  corrupt-success case) produce an output that decodes with no errors (`ffmpeg -v error -i out
-  -f null -` gives empty stderr) and has the expected duration.
+    `segment_precision == ["frame", "frame"]` **[R5: the fallback re-cuts both segments]**.
+  - **Continuity [R5]:**
+    - the frame count equals the literal sum of the segments' frame counts;
+    - every consecutive pts delta is one frame;
+    - video and audio durations agree within one frame.
+  - **Boundary identity [R5]:** four output frames (first, last of segment 0, first of
+    segment 1, and last) are identified by the frame-identity oracle as the literal source
+    frame indices for the requested edges. The oracle is not exact `framemd5`.
+  - The output decodes clean: `ffmpeg -v error -i out -f null -` gives empty stderr.
+- **Signature helper, unit level on prepared parts [R5, replaces the mixed-codec join test]:**
+  - an H.264 part and an HEVC part of the same source differ;
+  - a copy part and a re-encoded part of the same codec differ, since their `extradata_hash`
+    differs. The test asserts that premise directly;
+  - two WAV (PCM) parts match, with no extradata on either side;
+  - a rotated copy part differs from its auto-rotated re-encode.
+- **Audio-only fallback [R5]:** on a WAV source, the join helper is called with two segments
+  and an audio-only meta. The output has 0 video streams and 1 PCM audio stream, and its sample
+  count is the literal sum of the segments' counts.
+- **WAV copy join stays lossless [R5]:** `cut.py talk.wav --segments …` (with no
+  `--accurate`) gives `mode: copy` and no `concat_fallback`. That's the R4 finding 1
+  regression.
+- **Rotated source [R5]:** on the rotated fixture (`test_editing.py`'s `self.rot`), a mixed
+  copy/re-encode `--segments` cut gives `concat_fallback`, `rotation` 0, output
+  width × height = the source's **display** size, and the continuity checks above.
 - **Subtitles:** a source with a subtitle stream and mixed parts gives `concat_fallback` and
   `dropped_non_av_streams: true`, and the output probe shows 0 subtitle streams.
 - **Cut [R4]:**
@@ -381,14 +430,14 @@ Add `**({"transcription": args._asr} if getattr(args, "_asr", None) else {})` to
 ## Docs (Phase 1)
 
 - `references/scripts.md`: `cut.py`'s new keys and `--vfr-copy`, the source-codec re-encode, and
-  the concat-filter join.
+  the source re-cut join fallback.
 - `references/gotchas.md`: the Core Media HEVC edit-list lesson; that edit-listed copies store
   pre-roll; and that the end still lands on a packet boundary.
 - `docs/contract.md` and `_contract.py`: the new additive keys, plus the item 3 text.
 - `CHANGELOG.md` `## Unreleased`: behaviour changes, plus defect fixes for the concat-fallback
   report values **and the unsafe concat-demuxer re-encode**.
 - `docs/design-decisions.md`: the why behind the item 1 edit-list semantics, the item 2 sampled
-  measurement, and the item 3 filter join.
+  measurement, and the item 3 source re-cut join.
 
 ## Order and verification
 
@@ -400,8 +449,8 @@ Add `**({"transcription": args._asr} if getattr(args, "_asr", None) else {})` to
 6. Regenerate the MCP snapshot once, after `--vfr-copy`.
 
 Run the full suite on an empty `tests/out/` after each group. Baselines on this M3 Air: `test_all`
-608 OK (3 skipped), contract 150 OK (1 skipped). The committed `test_accel.py` cleanup lands
-separately first. Commit per group, with a Codex diff review before each commit.
+612 OK (3 skipped, after `1605b66`), contract 150 OK (1 skipped). The `test_accel.py` cleanup has already
+landed. Commit per group, with a Codex diff review before each commit.
 
 ---
 
