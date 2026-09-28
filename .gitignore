@@ -22,3 +22,4 @@ tests/corpus/
 
 # eval staging (fixtures, prompts, per-run outputs) -- not part of the repo
 scratchpad/
+.baton/
