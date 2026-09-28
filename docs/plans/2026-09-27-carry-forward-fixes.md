@@ -186,6 +186,25 @@ for `--segments` (see Phase 2).
    - A warning note suggesting `--accurate` when the absolute skew exceeds max(2 frames, 0.1 s).
    - Never re-encode automatically.
 
+**[R7] As built (measured while implementing).** These differ from the text above:
+- **`edit_list`** means "the single-segment MP4/MOV copy kept the edit list it wrote". The
+  double probe (normal vs `-ignore_editlist 1`) doesn't work: a B-frame composition offset makes
+  the two differ even on a keyframe-aligned start (at `-ss 4.0`: 3.1 vs 3.067 s).
+- **`stored_preroll_seconds` and `keyframe_snapped` come from the source's packets.** The
+  demuxer takes the keyframe with the largest **dts** ≤ start (`seek_keyframe`):
+  - with an edit list and that keyframe's pts ≤ start, the pre-roll is start − pts (0.3 s at
+    4.3 on the fixture) and the start isn't snapped;
+  - a keyframe presented after the start (the 10.0 keyframe has dts 9.833, so `-ss 9.9` takes
+    it) starts the picture 3 frames late: `keyframe_snapped: true`.
+  - The R4 formula (stored − presented duration) gave 0.233 s for 0.3 s.
+- **The frames past the requested end aren't contiguous.** An edit-list copy presented source
+  frames 217, 218, 221, 223 at its end (B-frames whose references weren't copied are dropped). The
+  last-frame test locates the frame by its own pts.
+- **Found, not fixed:** an `--accurate` x264 re-encode with `-avoid_negative_ts make_zero` starts
+  its video at 0.067 s and its audio at 0.043 s. That's a 24 ms skew on every accurate cut, and
+  predates this plan. A candidate for Phase 2: measure whether dropping `make_zero` on the
+  re-encode path gives both streams a start of 0.
+
 **Tests** (new `tests/test_cut_copy.py`, on the HEVC fixture unless noted).
 - **First frame:** the output's decoded first frame equals the source frame at T (framemd5),
   with T on a frame boundary.
