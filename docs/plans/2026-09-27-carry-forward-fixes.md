@@ -61,8 +61,23 @@ and 3):
   adjacent frames;
 - a stream copy is also checked for exactness (99 dB, meaning an identical decode).
 
-**Suggested next step:** one short Codex pass on item 3's R5 join, then implement in the order
-below.
+### R6 (Codex review of R5, gpt-6-sol xhigh: REVISE, 2 critical / 4 major / 1 minor)
+
+Each finding was checked locally before it was accepted. Changes are marked **[R6]** in the
+sections below.
+
+| Finding | Check | R6 resolution |
+|---|---|---|
+| **C1.** A copy join with matching signatures came out 4.02 s for a 2 s request | **Reproduced only outside `cut.py`.** Through `cut.py --segments 1-2,5-6` at the default `--tolerance 0.5`, both parts re-encode (2.05 s). At `--tolerance 2` the 4.28 s result is the requested trade: each part is within its tolerance, and `output_duration` reports it. | **Downgraded to Minor.** A join-level check is added: a copy join whose duration differs from the sum of its parts' measured durations by more than one frame takes the fallback. |
+| **C2.** `PTS-STARTPTS` discards the A/V offset | **Reproduced.** On a source with audio 0.379 s late, the joined audio moved 0.379 s early. | Neither stream is rebased: input `-ss` already puts both streams' segment origin at 0. The audio gets `aresample=async=1:first_pts=0`, which measured silence at 0–0.379 s and V = A = 4.000 s. A delayed-audio test is added. |
+| **M1.** A segment shorter than a frame, or one at EOF | Accepted. | A video segment whose part inside the video stream is shorter than one frame is **refused** before any cut, with a clear input error, in every path. |
+| **M2.** VFR through `cfr_args` | Accepted. | Literal frame-count and frame-identity oracles are for CFR fixtures only. A VFR fallback is checked by duration within one frame; its output is CFR by design. |
+| **M3.** AAC in MPEG-TS has no `extradata_hash` | Accepted. | "Absent on both sides is equal" applies only to codecs with no out-of-band configuration (`pcm_*`, `mp3`, `mp2`), or to an MPEG-TS output (Annex B / ADTS carry it in-band). Otherwise a missing hash is a mismatch. |
+| **M4.** 1000+ segments in one process | Accepted, by inference. | The fallback runs **at most 32 segments per ffmpeg call** (`JOIN_CHUNK`). Larger joins encode chunk files with identical arguments, check that the chunk signatures match (or refuse rather than guess), and copy-concat them. A 40-segment test covers two chunks. |
+| **m1.** The `-ss` rounding at `cut.py:133` (`.3f`) | Accepted. | The copy path passes `-ss`/`-t` with `.6f`. The rule is stated against the effective seek: the first presented frame is the first source frame with pts ≥ the `-ss` value. |
+
+**Suggested next step:** implement in the order below. R6 changes item 3 only in ways that were
+measured, so no further plan pass is planned. The diff reviews before each commit still apply.
 
 ## Constraints (all items)
 
@@ -153,8 +168,9 @@ for `--segments` (see Phase 2).
      5.433 − 5.067 = 0.367 s, which equals the negative-pts span.
    - `keyframe_snapped` **[R5, a computable rule]**:
      - When `edit_list` is true it is **false**. The measured rule is that the edit list
-       presents the first source frame with pts ≥ T, which is within one frame of the request
-       by construction.
+       presents the first source frame with pts ≥ the effective seek. **[R6]** The copy path
+       now passes `-ss`/`-t` with `.6f`: at `.3f`, T = 0.0334 was sent as 0.033 and presented
+       the frame before T. That start is within one frame of the request by construction.
      - When `edit_list` is false and the copy started more than one frame from T (for
        example `.mkv`, which has no edit lists), it is true.
      - It is only ever true on a stream copy.
@@ -315,20 +331,34 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
    - **A failed probe, or a missing stream, counts as incompatible.** (FFmpeg's automatic concat
      conversion covers H.264-in-MP4 but not HEVC, so for the HEVC case this plan centres on,
      only an exact match is safe.)
-   - **[R5] Fields are compared as values:** a field that's absent from *both* parts is equal,
-     and absent from only one is a mismatch. PCM carries no `extradata_hash`, so two WAV parts
-     still match and keep their lossless copy join. An H.264 or HEVC part that lost its
-     extradata no longer matches one that has it.
+   - **[R5, narrowed in R6] Fields are compared as values**, and a field absent from only one
+     part is a mismatch. `extradata_hash` absent from *both* parts counts as equal only for
+     codecs with no out-of-band configuration (`pcm_*`, `mp3`, `mp2`) or for an MPEG-TS output,
+     where Annex B / ADTS carry it in-band. Anywhere else, a missing hash is a mismatch. So two
+     WAV parts still match and keep their lossless copy join.
+   - **[R6] Join-level check:** after a copy join, if the output's duration differs from the
+     sum of the parts' measured durations by more than one frame (or 0.05 s for audio-only),
+     take the fallback.
 4. **A safe join fallback [R4, redesigned in R5].** On any mismatch, or if the copy concat
    fails, **re-cut every segment from the source** in one filter graph. The parts are
    discarded. The fallback is a re-encode, so no segment keeps a lossless copy either way, and
    re-cutting avoids having to repair parts that are the wrong length (the pre-roll and audio
    tail measured above).
    - One input per segment: `-ss <s_i> -t <d_i> -i SRC`. Input seeking with the default
-     `accurate_seek` decodes from the prior keyframe and discards frames up to `s_i`.
-   - Per segment: `[i:v]trim=duration=<d_i>,setpts=PTS-STARTPTS[v_i]` and
-     `[i:a]atrim=duration=<d_i>,asetpts=PTS-STARTPTS[a_i]`. Both streams are cut to the same
-     length, so the concat filter's longest-stream rule leaves no gap.
+     `accurate_seek` decodes from the prior keyframe and discards frames up to `s_i`. It also
+     maps `s_i` to 0 on **both** streams, which is the segment's shared origin.
+   - **[R6] Per segment, with no per-stream rebase:** `[i:v]trim=end=<d_i>[v_i]` and
+     `[i:a]atrim=end=<d_i>,aresample=async=1:first_pts=0[a_i]`. The `aresample` pads audio
+     that starts after the origin with silence, so the A/V offset survives. R5's
+     `PTS-STARTPTS` dropped it, which was measured on a source with audio 0.379 s late. Both
+     streams end at `d_i`, so the concat filter's longest-stream rule leaves no gap.
+   - **[R6] Chunking:** at most `JOIN_CHUNK = 32` segments per ffmpeg call. For more:
+     - each chunk is encoded to a temp file with identical arguments;
+     - the chunk signatures must match, or the join is refused;
+     - the chunks are copy-concatenated.
+   - **[R6] Segment floor:** every video segment's part inside the video stream must be at
+     least one frame long. This is checked before any cut, in every path, and a shorter segment
+     is refused with an input error.
    - `concat=n=N:v=V:a=A`:
      - V = 1 when the source has video and the output isn't an audio extension;
      - A = 1 when the source has audio;
@@ -336,7 +366,8 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
    - Then `-sn -dn`, and `encode_args(meta, output, crf, preset)`: the same codec, CFR, HDR and
      tag rules as a single `--accurate` cut, including item 3.1's source codec.
    - Every segment decodes from the same source with the same autorotation, so rotation, SAR
-     and geometry are consistent by construction. The output is display-oriented with rotation
+     and geometry are consistent by construction. **[R6]** On a VFR source, `cfr_args` makes
+     the output CFR, so frame-exact oracles apply to CFR sources only. The output is display-oriented with rotation
      0, as the `--accurate` path already produces.
    - **Reporting:** `concat_fallback` in the reasons; `reencoded` true; `mode` is not `copy`;
      `segment_precision` is each segment's re-encoded precision (`frame` for video, `sample` or
@@ -383,6 +414,17 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
 - **WAV copy join stays lossless [R5]:** `cut.py talk.wav --segments …` (with no
   `--accurate`) gives `mode: copy` and no `concat_fallback`. That's the R4 finding 1
   regression.
+- **Delayed audio [R6]:** on a source whose audio starts 0.379 s after its video, a mismatched
+  two-segment cut starting at 0 has silence over 0–0.38 s (±0.02 s, measured with
+  `silencedetect`), and its video and audio durations agree within one frame.
+- **Segment floor [R6]:** `--segments 1-1.01,3-4` on a 30 fps source is refused with an input
+  error, and nothing is written.
+- **Chunking [R6]:** 40 segments of 0.2 s that force the fallback give 2 chunks, a clean decode,
+  a frame count of `40 × 6` and a single video stream.
+- **Join-level check [R6, unit]:** a copy join whose probed duration is one second longer than
+  the sum of its parts takes the fallback. Probes are faked; no encode.
+- **Extradata rule [R6, unit]:** AAC without a hash on both sides into `.mp4` is a mismatch;
+  into `.ts` it's equal; `pcm_s16le` without a hash is equal.
 - **Rotated source [R5]:** on the rotated fixture (`test_editing.py`'s `self.rot`), a mixed
   copy/re-encode `--segments` cut gives `concat_fallback`, `rotation` 0, output
   width × height = the source's **display** size, and the continuity checks above.
