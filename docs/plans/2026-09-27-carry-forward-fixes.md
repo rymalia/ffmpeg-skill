@@ -319,6 +319,30 @@ trip it. `cut.py:303` then forces `--accurate` with no opt-out.
   - "`--vfr-copy` with the default tolerance": not a stable assertion;
   - the separate 29.97/600 encode: moved to a classifier unit test.
 
+**As built (measured while implementing).** These differ from the text above:
+- **The driver reads integer `pts`/`dts` ticks**, not `pts_time`: six-decimal rounding would eat a
+  one-tick tolerance.
+- **The tolerance is capped at half the smallest window median.** At a coarse time base (AVI's
+  1/fps) one tick is a whole frame, and one tick of slack passed a dropped frame.
+- **`-read_intervals` resolves against the keyframe it seeks to.** A relative end (`t%+6`) ended six
+  seconds past that keyframe, so on a long GOP every window re-read the first seconds (measured on
+  `tests/out/source.mp4`, keyframes 0 and 8.33). Windows name an absolute end and keep only pts ≥
+  their start.
+- **The first window does not seek.** A seek to the start of an edit-listed MP4 skipped its
+  negative-pts keyframe (13 packets instead of 72), and seeks near it behaved erratically (`0`,
+  `-0.25` skip it; `-1`, `0.5` don't), so no margin is safe. Cost: a file whose video begins long
+  after its first packet is demuxed up to the video start.
+- **Window starts add the video's `start_time`**: `-read_intervals` takes absolute timestamps.
+- **`V:0`, not `v:0`**, so cover art stored first is not measured (probe() skips it the same way).
+  Not test-pinned: FFmpeg 9's MP4 muxer moves cover art last and Matroska drops the disposition.
+- **`complete_pts`** keeps only pts ≤ the last dts read. FFmpeg 9.0 MP4 reads measured whole, so
+  it is defensive.
+- **The check is skipped (no `vfr_check` key) when nothing would copy**: `--accurate`, `--codec`,
+  audio output, or a dry-run input not written yet. `vfr` and `codec` therefore no longer both
+  appear in `reencode_reason`.
+- **The mocked-ffprobe-failure integration test** became a unit test with `run` mocked, plus a real
+  0.5 s clip that is `inconclusive` (13 intervals).
+
 ## Item 3 — re-encoded cuts keep the source codec; a safe join
 
 **Evidence.**
