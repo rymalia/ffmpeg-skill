@@ -352,7 +352,8 @@ engine present. Whisper is never a dependency of this skill.
 parakeet-mlx, or parakeet-cli with a `.gguf` model it can find. Either engine family
 satisfies `--transcribe`; `--engine auto` (the default, or `FFMPEG_SKILL_ASR_ENGINE`) runs
 Parakeet for English speech and Whisper for every other language, and the result's
-`transcription` says which engine, model and routing decision produced the cues.
+`transcription` says which engine, model and routing decision produced the cues (in every
+`--mode`, `mux` included).
 
 `doctor` has three states per capability. `available` and `missing` come from a listing
 that was read; `unknown` means the listing that would prove the capability could not be
@@ -387,7 +388,9 @@ encode, which this introspection never runs). No tool declares or requires a GPU
 `gpu_encoders` never affects `ok` or any tool's `usable`. Since 2.4, `--hw` (and
 `FFMPEG_SKILL_HW=1`, which `export.py`'s delivery presets ignore) puts h264/hevc/prores encodes on
 VideoToolbox on Apple Silicon only; a job the GPU refuses is re-encoded on the CPU and said so in
-the result's `hw.notes`. `doctor`'s `hw` field is `{platform_ok, default_on}` — normalised
+the result's `hw.notes`. When `FFMPEG_SKILL_HW=1` rather than `--hw` chose the GPU and the GPU ran,
+`hw.notes` also says so, with the file-size cost and `--no-hw` as the remedy for a final
+deliverable. `doctor`'s `hw` field is `{platform_ok, default_on}` — normalised
 booleans, never the environment value.
 
 `doctor`'s `fonts` field reports whether the default drawtext font (`caption.py`'s

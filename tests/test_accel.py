@@ -231,6 +231,24 @@ class HwReviewRegressionTests(unittest.TestCase):
         STATE.commands = []  # batch.py: the stages are child processes it does not record
         self.assertIsNone(emit._encoder_report(STATE)["hw"]["used"])
 
+    def test_an_env_chosen_gpu_encode_says_how_to_get_the_cpu_one(self):
+        """FFMPEG_SKILL_HW=1 puts every tool on VideoToolbox, whose files are larger at the same
+        quality; a result says so only when the environment chose the GPU and the GPU ran."""
+        import importlib
+        emit = importlib.import_module("_common.emit")
+        gpu, cpu = "ffmpeg -i a -c:v h264_videotoolbox -q:v 75 b.mp4", "ffmpeg -i a -c:v libx264 -crf 18 b.mp4"
+        for hw, source, command, noted in [(True, "env", gpu, True), (True, "flag", gpu, False),
+                                           (True, "env", cpu, False), (False, None, cpu, False)]:
+            with self.subTest(hw=hw, source=source, command=command):
+                STATE.hw, STATE.hw_source, STATE.hw_notes, STATE.commands = hw, source, [], [command]
+                rep = emit._encoder_report(STATE)
+                if not hw:
+                    self.assertNotIn("hw", rep)
+                    continue
+                notes = rep["hw"]["notes"]
+                self.assertEqual(any("FFMPEG_SKILL_HW=1" in n and "--no-hw" in n for n in notes), noted, notes)
+                self.assertEqual(STATE.hw_notes, [], "the report adds the note; the run's own list is untouched")
+
     def test_parakeet_cpp_runs_with_only_an_explicit_model(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"HOME": d}):
             os.environ.pop("PARAKEET_CPP_MODEL", None)
@@ -467,6 +485,14 @@ class ParakeetEngineTests(MediaFixtures):
                                 "-o", OUT / "pk_cpp.mp4", env=self.env()).stdout)
         self.assertEqual(doc["transcription"]["engine"], "parakeet.cpp")
         self.assertIn("So um we start.", (OUT / "pk_cpp.srt").read_text())
+
+    def test_caption_mux_reports_the_transcription_too(self):
+        """--mode mux wrote a soft subtitle track from the transcript but left `transcription` out of
+        its result, so a caller could not tell which engine made it."""
+        doc = json.loads(script("caption.py", self.src, "--transcribe", "--engine", "parakeet.cpp", "--mode", "mux",
+                                "--json", "-o", OUT / "pk_mux.mp4", env=self.env()).stdout)
+        self.assertEqual(doc["subtitle_tracks"], 1)
+        self.assertEqual(doc["transcription"]["engine"], "parakeet.cpp")
 
     def test_caption_takes_the_engine_from_the_environment(self):
         """$FFMPEG_SKILL_ASR_ENGINE reaches caption.py through its real parser (no --engine given)."""
