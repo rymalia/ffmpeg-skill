@@ -898,3 +898,11 @@ not a new file format this tool would have to maintain.
   start, and the first window does not seek (a seek to 0 on an edit-listed MP4 skipped its
   negative-pts keyframe). Code: `_common/probe.py` `classify_frame_timing`,
   `measure_frame_timing`. Tests: `FrameTimingTests`, `VfrGuardTests`.
+- **A plain `join.py` cut gives each clip one length, as a crossfade does.** The concat filter
+  starts the next clip after the *longer* stream of this one, so the picture of a clip whose sound
+  runs past it -- a music bed padded to the container, or only an AAC tail -- got a hole (measured:
+  0.3 s, and one frame from a 20 ms tail). `clip_length` decides the length for both paths: the
+  sound's when it runs more than a frame past the picture (the last frame is held; narration is never
+  cut), the picture's otherwise (the tail is trimmed). Tests:
+  `test_join_none_holds_a_picture_shorter_than_its_sound`,
+  `test_join_none_trims_a_sound_tail_under_a_frame`.

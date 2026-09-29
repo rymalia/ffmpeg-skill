@@ -103,8 +103,9 @@ or reported; **Low** = friction, surprising default, or missing option.
 
 ## Joining and timing
 
-### J1. Stream-copy join leaves a video timestamp gap when a clip's audio is longer than its video — Medium
-- **Component:** `scripts/join.py` (concat copy path, `--transition none`)
+### J1. Plain-cut join leaves a video timestamp gap when a clip's audio is longer than its video — Medium — FIXED (Unreleased)
+- **Status:** fixed on `m-series-hw-parakeet`: every clip gets one length for both streams (the crossfade path's `clip_length` rule). Tests `test_join_none_holds_a_picture_shorter_than_its_sound`, `test_join_none_trims_a_sound_tail_under_a_frame`.
+- **Component:** `scripts/join.py`, `--transition none`. **Correction:** this is not a stream copy — `join.py` always re-encodes; its plain cut uses the `concat` *filter*, which starts each clip after the previous clip's longer stream. `cut.py --segments` had the same hole on both of its join paths (Phase 2 item 2).
 - **Symptom:** clip A has video 57.067 s and audio 57.304 s. Clip B's video is placed after A's
   *container* duration, leaving a 0.237 s hole in the video timeline. Probe then reports odd rates
   (`5993/200`), and downstream re-encodes inherit them (`broll.py` wrote 29.887 fps). A/V stays in
