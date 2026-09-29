@@ -263,6 +263,36 @@ H.264 g30):
 
 ---
 
+**As built (item 2).**
+- **One unplanned finding.** `--accurate` joins re-encoded each part on its own and then
+  copy-joined them. Each part's AAC ran one encoder frame past its picture, which left a 23 ms
+  hole at every join, even on a source with equal-length streams. Sub-frame test 2-d exposed it.
+  `--accurate` multi-segment joins now go straight to `join_from_source` (one encode, reason
+  `requested` only). This is probably the root of the deferred "24 ms `--accurate` skew".
+- **Where the checks live.** The hold and the trim are decided in `main` (`video_end`, on the
+  cut's clock). `_join_chunk` gets the exact set of segments to hold, and the last segment is
+  never held.
+- **Review (Opus; Codex was at its usage limit): FIX, 1 major and 3 minor, all applied.**
+  - **M1:** on the **copy** path the sub-frame trim changes nothing, because each copied part's
+    AAC still runs past its picture (the item-1 problem). The trim note no longer claims "no
+    gap", and 2-d's copy variant is deferred to item 1 (like 2-c). 2-d is built with
+    `--accurate`.
+  - **m1:** holds are keyed by segment index, so a repeat of a held segment in last place is not
+    held.
+  - **m2:** the VFR guard is skipped when a hold already rules out a copy.
+  - **m3:** the contract's `notes` text names the new notes.
+- **Mutation-checked.** Seven mutants were run, and all were killed:
+  - no hold;
+  - no sub-frame trim;
+  - `--accurate` not routed;
+  - no origin correction;
+  - the last segment held too (killed only after the last-segment test gained a frame count);
+  - holds keyed by value;
+  - a VFR guard that ignores the hold.
+- **The second review pass (Opus) said SHIP.** All four findings were resolved. The chunked path's
+  `first=k` offset was verified by experiment: the only held segment, at index 33, produced
+  1044 frames with every step one frame.
+
 ## Item 1: a `--segments` stream-copy join is exact, or it isn't a copy
 
 ### [R2] Step 0: the prototype gate, before production code
