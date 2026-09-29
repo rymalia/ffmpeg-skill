@@ -520,6 +520,10 @@ Add `**({"transcription": args._asr} if getattr(args, "_asr", None) else {})` to
   `die_no_speech`, which reports **"no speech in the video"** instead of "the engine's output was
   unreadable". The proposed fix: when the engine exited 0 but its output didn't parse, log it
   and fall through to the next engine, the same as a crash.
+- **Resolved (2026-09-28, approved by the user):** only the engine's own empty answer
+  (`{"words": []}` / `{"sentences": []}`, measured on both real engines on silence) is "no
+  speech"; other output that yields no words falls through under `auto`. For `--filler` under
+  `auto`, cues without word timings fall through too; a named engine keeps its own refusals.
 
 ---
 
