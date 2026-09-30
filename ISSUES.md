@@ -11,7 +11,13 @@ or reported; **Low** = friction, surprising default, or missing option.
 
 ## Text and graphics
 
-### T1. Multi-line drawtext drops line breaks and the space between them — High
+### T1. Multi-line drawtext drops line breaks and the space between them — High — FIXED (Unreleased)
+- **Status:** fixed on `m-series-hw-parakeet`. **Correction to the cause below:** drawtext on
+  ffmpeg 9.0.2 *does* render `\n` from a `textfile=` as a line break; `drawtext_text_opts`
+  stripped it with every other control character. It now keeps `\n` (normalising `\r\n`/`\r`),
+  and the centred templates (title, hook, meme) add `text_align=C` on FFmpeg ≥ 6.1 so each line
+  is centred. Cause 1 (the em-width wrap estimate) is a fit question, tracked with T2. Tests
+  `MultiLineDrawtextTests` in `tests/test_picture.py`.
 - **Component:** `scripts/graphics.py` (`wrapped()`), `scripts/_common/wrap.py` (`wrap_text`),
   `scripts/_common/drawtext.py` (`drawtext_text_opts`, `textfile=…:expansion=none`)
 - **Symptom:** a title that gets wrapped renders as ONE line with the space at the break removed:

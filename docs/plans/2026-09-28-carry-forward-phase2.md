@@ -547,6 +547,22 @@ box is 453 px tall, sized for two lines, so the wrap *was* decided.
 
 Codex validates this section together with the rest of R2.
 
+**As built (T1).** Built as planned. `drawtext_center_align()` (`_common/drawtext.py`) is the
+version gate; it goes on the `title` (title and subtitle), `hook` and `meme` drawtexts. The
+lower-third, sticker and `overlay.py --text` stay left-aligned. The caller audit found none that
+relied on dropped newlines: they reach drawtext only from `wrapped()` or from the user. The
+integration test measured line centres at 538.5 and 539.5 px on a 1080-wide frame (plan: within
+2 px). Mutation: restoring the full control-character strip gives one band running off both
+edges; dropping `text_align` puts the short line's centre at 308.5 px. Both are killed.
+- **Review (Opus; Codex was at its usage limit): SHIP, 4 minors.** Two were applied. The test's
+  centring tolerance is 6 px, not 2: 1.5 px of the 2 was already used by glyph side bearings, and
+  another machine's default font would move that. A tab, vertical tab or form feed becomes a
+  space instead of joining the words. Two were declined:
+  - On the drawtext route a right-anchored sticker's lines are left-aligned inside the chip,
+    where the ASS route right-aligns them. This is the plan's choice, and not a break.
+  - A newline the user types into the lower-third or `title --title` now breaks the line and can
+    overlap the next element, which assumes one line. Before, it was silently deleted.
+
 ## Docs
 
 - `CHANGELOG.md` `## Unreleased`, one entry per item.
