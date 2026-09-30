@@ -250,7 +250,7 @@ here should need a commit.
 - `doctor` reports `external:whisper` from the binary's presence alone. It won't tell you
   a model is missing. Step 3 is what makes whisper actually work.
 - `export.py` delivery presets stay on the CPU even with `FFMPEG_SKILL_HW=1`, by design
-  (VideoToolbox needs 1.2–2.5× the bytes at matched quality). `render.py`/`batch.py --hw`
+  (VideoToolbox needs 1.1–2.9× the bytes at matched quality on SDR, 1.9–3.5× on HDR). `render.py`/`batch.py --hw`
   is the explicit GPU-export switch.
 - H.264 VideoToolbox tops out at 4096 wide. The skill falls back to the CPU on its own and
   notes it in `hw.notes`.
