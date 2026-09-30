@@ -13,11 +13,11 @@ Every output frame is checked bit-exact (framemd5) against the literal source fr
 segments name, and every presentation step against 1/fps. The beep rows also measure A/V sync:
 each beep's onset against the pts of the frame it belongs to.
 
-A row passes when its frames are exact, every step is within half a frame of 1/fps (the plan's
-join check), and every beep lands within 5 ms. `max step` shows what remains below half a frame:
-with no B-frames a part's audio ends up to one AAC frame after its video, the concat demuxer
-places the next part after the audio, and that frame is shown a few ms longer. Both streams of
-the next part move together, so the beeps stay in sync (the nob row).
+A row passes when its frames are exact, every step is within cut.check_join's bound (1/fps plus
+the longer of half a frame and one AAC frame, 1024/48000 s), and every beep lands within 5 ms.
+`max step` shows what remains: with no B-frames a part's audio ends up to one AAC frame after its
+video, the concat demuxer places the next part after the audio, and that frame is shown a few ms
+longer. Both streams of the next part move together, so the beeps stay in sync (the nob row).
 
     python3 tests/prototypes/join_copy_p3.py [--dir tests/out/prototypes]
 
@@ -175,7 +175,7 @@ def main():
             pts = frame_pts(out)
             steps = [y - x for x, y in zip(pts, pts[1:])]
             worst = max(steps, key=lambda x: abs(x - 1 / fps))
-            smooth = abs(worst - 1 / fps) < 0.5 / fps
+            smooth = all(0.5 / fps < x < 1 / fps + max(0.5 / fps, 1024 / 48000) for x in steps)
             st = streams(out)
             beeps = ""
             if skew is not None:
@@ -197,7 +197,7 @@ def main():
         for f in failed:
             print("  " + f)
         return 1
-    print("GATE PASSED: every closed-GOP row is exact with P3, continuous within half a frame, and in sync.")
+    print("GATE PASSED: every closed-GOP row is exact with P3, continuous, and in sync.")
     return 0
 
 

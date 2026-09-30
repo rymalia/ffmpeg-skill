@@ -462,6 +462,35 @@ open-GOP)
   - disable the join check, and 1-c must fail via the open-GOP check. Then disable **both**, and
     1-c must fail.
 
+**As built (item 1).**
+- **[R5] Change 3 (b)'s bound is widened.** A step may exceed 1/fps by ½ a frame **or by the
+  audio's codec frame** (its most common packet duration), whichever is longer. On sources with
+  no B-frames each part's AAC ends up to one audio frame after its picture, and the demuxer
+  places the next part after it. Measured: 32.7 ms steps at 60 fps (bound 25 ms), 53.5 ms at
+  30 fps with 44.1 kHz audio (bound 50 ms). The frames are exact and the beeps land at 0 ms. The ½-frame
+  bound would have re-encoded iPhone "Most Compatible" footage that copies exactly today. Codex
+  (review 1) judged the widening sound for that mechanism. It flagged the first version, which
+  took the *longest* of the first 50 audio packets, and the typical packet duration is now used.
+  Test: `test_a_60fps_source_without_bframes_stays_an_exact_copy`.
+- **Unplanned: only copied parts are copy-joined** (video joins). The new end snap sent every
+  part of the 40-segment chunk test to a re-encode. The re-encoded parts matched each other, so
+  they were copy-joined, the per-part-encode join that left a 23 ms hole in item 2. A
+  segment planned to re-encode now re-cuts the whole join at once, and any part that re-encoded
+  anyway (`copy_failed`, a Matroska length check) sends the join to `join_from_source`. Audio-only
+  joins (PCM parts) are exempt.
+- **Matroska `--segments` joins of B-frame video were also wrong, and they reported a clean copy.**
+  The join check now catches them (`test_a_matroska_join_is_checked_and_recut_when_it_is_wrong`).
+- **The full-file packet scan** (`cut.video_packets`, one demux per source) replaces a
+  window scan. Open-GOP detection therefore sees a GOP that ends at EOF whole, and judges it
+  closed when no packet after its keyframe is presented before it. A missing pts or dts counts
+  as open.
+- **Known and accepted:** an open *start* keyframe on the first segment is allowed by change 2.
+  But `expected_packets` counts only pts ≥ the keyframe's, so its leading pictures (still
+  demuxed from the part) make the check fail. That join is re-cut, a false fallback that is
+  still correct output. No fixture has a mixed open/closed GOP to test it on.
+- **A part shorter than 1 ms** (a start within a millisecond of the end keyframe's dts)
+  re-encodes rather than cut `-t ≈ 0`.
+
 ---
 
 ## Item T1: multi-line drawtext drops the line break
