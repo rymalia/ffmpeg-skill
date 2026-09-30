@@ -307,6 +307,21 @@ It runs P0 and P3 over every row below and prints frames, exactness, pts steps a
 
 **If any closed-GOP row is not exact, stop and revise this item before building.**
 
+**Step 0 result (2026-09-29, FFmpeg 9.0.2): the gate passes.** `python3
+tests/prototypes/join_copy_p3.py` exits 0. P3 is bit-exact on every closed-GOP row: `h264bf` and
+`hevc25c`, `.mp4` and `.mov`, the EOF last part, `late_audio`, and `h264bf_late` (the 0.379 s
+offset on a B-frame source). No step is off 1/fps. All six onsets are measured on `beep`, `beep_late`
+and `nob`; skew is 0 ms, or 379 ms on `beep_late` (its own offset, held in every segment). P0
+drifts to 67 ms and then 133 ms. `hevc25` (open GOP) loses 6 frames with P3, as M1b says.
+- **New, not in M1b:** on a source with **no B-frames** (`late_audio`, and `nob`, the iPhone
+  "Most Compatible" shape), each part's AAC runs up to one audio frame past its video. The
+  demuxer places the next part after the audio, so the last frame before a join shows 5–16 ms
+  longer (worst step 49.3 ms at 30 fps). P0 does the same today. The frames stay exact and
+  the beeps stay at 0 ms, because both streams of the next part move together. That step is below the
+  ½-frame bound in change 3 (b), so the join check passes it by design. The tests on
+  no-B-frame sources must not assert that every step is exactly 1/fps; 1-a and 1-b (B-frame
+  sources) may.
+
 ### Change 1: cut the parts the P3 way
 
 In `cut_one`, when `edit_list_ok=False` (concat parts):
