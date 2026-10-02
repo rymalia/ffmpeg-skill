@@ -109,7 +109,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 ---
 
-## D: `pr/cut-exact-joins` (9 commits on top of C1; draft until C1 merges)
+## D: `pr/cut-exact-joins` (9 commits on top of C1; draft until C1 merges) — #306
 
 **cut.py: exact `--segments` copy joins, and reports that say what happened**
 
