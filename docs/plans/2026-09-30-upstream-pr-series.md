@@ -4,7 +4,7 @@ Base: every branch is rebased onto `upstream/main` at `9392328` (v2.4.0, which a
 
 Paste these descriptions over GitHub's pre-filled body. For a one-commit PR, GitHub fills the body from the commit message, and A's message mentions the Opus/Codex review.
 
-Order: **A, B and E now** (independent of each other). **C1 and C2 together** (independent). **D as a draft stacked on C1**, marked ready once C1 merges.
+Order: **A, B and E now** (independent of each other). **C1 and C2 together** (independent). **D as a draft against `main`**, opened after C1. D needs C1's code, and a fork's PR can only target a branch in the upstream repo, so until C1 merges D's PR also shows C1's 6 commits. Once C1 merges, rebase D onto `upstream/main`, push, and mark it ready.
 
 After each merge, the remaining PRs conflict in `CHANGELOG.md` (every pair does). Other conflicts:
 - C1 × C2 (and C2 × D): `scripts/_contract.py`, `tests/test_all.py`, `docs/contract.md`, `docs/design-decisions.md`.
@@ -64,7 +64,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 ---
 
-## C1: `pr/hw-videotoolbox` (6 commits)
+## C1: `pr/hw-videotoolbox` (6 commits) — #304
 
 **feat: opt-in Apple VideoToolbox encoding (`--hw`)**
 
@@ -87,7 +87,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 ---
 
-## C2: `pr/asr-parakeet` (5 commits, independent of C1)
+## C2: `pr/asr-parakeet` (5 commits, independent of C1) — #305
 
 **feat: Parakeet speech engines for `--transcribe`**
 
@@ -109,9 +109,11 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 ---
 
-## D: `pr/cut-exact-joins` (9 commits, stacked on C1, draft until C1 merges)
+## D: `pr/cut-exact-joins` (9 commits on top of C1; draft until C1 merges)
 
 **cut.py: exact `--segments` copy joins, and reports that say what happened**
+
+> **Draft: builds on #304.** This branch includes #304's 6 commits, so please review only the last 9 here; GitHub will drop #304's commits from this PR once #304 merges and this branch is rebased. I'll mark it ready then.
 
 - **Exact joins:** a `--segments` stream-copy join is frame-exact, or it isn't a copy. Parts are planned from the source's packets and the join is measured (`join_check`). Mismatched parts are re-cut from the source instead of going through the concat demuxer.
 - **Single-part copies:** a single MP4/MOV copy keeps its edit list. `--accurate` and the join re-cut seek one second early, so frames just before a keyframe are kept.
