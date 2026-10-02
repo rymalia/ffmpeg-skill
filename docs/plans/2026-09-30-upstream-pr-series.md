@@ -2,6 +2,8 @@
 
 Base: every branch is rebased onto `upstream/main` at `9392328` (v2.4.0, which added upstream #299 and #300). These features are not in 2.4.0, so the docs call them "Unreleased", never "2.4".
 
+Paste these descriptions over GitHub's pre-filled body. For a one-commit PR, GitHub fills the body from the commit message, and A's message mentions the Opus/Codex review.
+
 Order: **A, B and E now** (independent of each other). **C1 and C2 together** (independent). **D as a draft stacked on C1**, marked ready once C1 merges.
 
 After each merge, the remaining PRs conflict in `CHANGELOG.md` (every pair does). Other conflicts:
