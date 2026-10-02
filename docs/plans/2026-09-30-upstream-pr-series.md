@@ -1,7 +1,14 @@
 # PR drafts: rymalia/ffmpeg-skill → kajisho5/ffmpeg-skill
 
+Base: every branch is rebased onto `upstream/main` at `9392328` (v2.4.0, which added upstream #299 and #300). These features are not in 2.4.0, so the docs call them "Unreleased", never "2.4".
+
 Order: **A, B and E now** (independent of each other). **C1 and C2 together** (independent). **D as a draft stacked on C1**, marked ready once C1 merges.
-Whichever PR merges second re-resolves `CHANGELOG.md` and regenerates `tests/fixtures/mcp_tools.json` with `UPDATE_MCP_SNAPSHOT=1 python3 tests/test_contract.py`.
+
+After each merge, the remaining PRs conflict in `CHANGELOG.md` (every pair does). Other conflicts:
+- C1 × C2 (and C2 × D): `scripts/_contract.py`, `tests/test_all.py`, `docs/contract.md`, `docs/design-decisions.md`.
+- B × C1, B × C2, B × D: `docs/design-decisions.md`, where each appends a section at the end; keep both.
+
+`tests/fixtures/mcp_tools.json` merges cleanly in every pair. If it ever conflicts, regenerate it with `UPDATE_MCP_SNAPSHOT=1 python3 tests/test_contract.py`.
 
 ---
 
@@ -16,7 +23,7 @@ Whichever PR merges second re-resolves `CHANGELOG.md` and regenerates `tests/fix
 
 **For review:** every drawtext caller (`overlay.py --text`, lower thirds, stickers) now renders a newline in the user's text as a line break. That is intended, but it is a behaviour change.
 
-**Tests:** `MultiLineDrawtextTests`. `test_picture`: OK (3 skipped).
+**Tests:** `MultiLineDrawtextTests`. `test_picture`: 211 OK (3 skipped).
 
 ---
 
@@ -31,9 +38,11 @@ With `--transition none`, the concat filter starts each clip after the *longer* 
   - otherwise the sound tail is trimmed.
 - `-fps_mode passthrough` now covers the plain cut too.
 
-**For review:** `expected_duration` now counts `clip_length`, not container durations.
+**For review:**
+- `expected_duration` now counts `clip_length`, not container durations.
+- #300's `silent[].at`/`end` now counts the same lengths on a plain cut, so it gives the position of the clip's actual picture and sound. The audio-only path keeps `place_silent(durs, d)`.
 
-**Tests:** `test_join_none_holds_a_picture_shorter_than_its_sound`, `test_join_none_trims_a_sound_tail_under_a_frame`. `test_editing`: OK.
+**Tests:** `test_join_none_holds_a_picture_shorter_than_its_sound`, `test_join_none_trims_a_sound_tail_under_a_frame`. `test_editing`: 133 OK.
 
 ---
 
@@ -49,7 +58,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 **For review:** the `loop` filter's 32767-frame cap and the ~2 GiB memory warning.
 
-**Tests:** 7 new tests in `test_editing`, including frame order checked by `framemd5` and a VFR source. `test_editing`: OK. Contract: OK (1 skipped).
+**Tests:** 7 new tests in `test_editing`, including frame order checked by `framemd5` and a VFR source. `test_editing`: 138 OK. Contract: 152 OK (1 skipped).
 
 ---
 
@@ -72,7 +81,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 - the flag vs environment semantics;
 - the fitted curve constants.
 
-**Tests:** `tests/test_accel.py`, with real VideoToolbox encodes on Apple Silicon only. Full suite: 602 OK (3 skipped); `test_accel` 25 OK on the final tip. Contract: 150 OK (1 skipped).
+**Tests:** `tests/test_accel.py`, with real VideoToolbox encodes on Apple Silicon only. Full suite: 602 OK (3 skipped). `test_accel`: 25 OK. Contract: 152 OK (1 skipped).
 
 ---
 
@@ -92,7 +101,7 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 - how the subprocess JSON is parsed;
 - the module-level `LAST_RUN` / `LAST_WORDS` hand-off to callers.
 
-**Tests:** `tests/test_asr.py` (engines driven through fake binaries on an otherwise empty PATH), plus `WhisperDefaultModelTests`. Full suite: 598 OK (3 skipped). Contract: 150 OK (1 skipped).
+**Tests:** `tests/test_asr.py` (engines driven through fake binaries on an otherwise empty PATH), plus `WhisperDefaultModelTests`. Full suite: 598 OK (3 skipped). `test_asr`: 20 OK. Contract: 152 OK (1 skipped).
 
 **Merge note:** if C1 merges first, this PR gets conflicts in `_contract.py`, where both add a function at the same spot (keep both), and in `test_all.py`, `docs/contract.md`, `docs/design-decisions.md` and `CHANGELOG.md`.
 
@@ -115,4 +124,4 @@ The frames play 0..N-1, then N-2..1, repeated, so the loop never jumps. Unlike t
 
 **For review:** `plan_part`, `open_join_key` and `check_join`, the edit list vs `make_zero` semantics, and the `measure_frame_timing` windows.
 
-**Tests:** `tests/test_cut_copy.py`, plus `test_editing`, `test_orchestration` and the contract suite: `test_cut_copy` 93 OK, `test_editing` 132 OK, `test_orchestration` 80 OK, contract 150 OK (1 skipped).
+**Tests:** `tests/test_cut_copy.py`, plus `test_editing`, `test_orchestration` and the contract suite: `test_cut_copy` 93 OK, `test_editing` 132 OK, `test_orchestration` 80 OK, `test_delivery` 21 OK, `test_accel` 25 OK, contract 152 OK (1 skipped).
