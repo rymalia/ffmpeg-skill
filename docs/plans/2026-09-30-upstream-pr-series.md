@@ -9,7 +9,7 @@ Whichever PR merges second re-resolves `CHANGELOG.md` and regenerates `tests/fix
 
 **fix(graphics): a wrapped title is drawn on its lines**
 
-`graphics.py` wrapped a title that did not fit, and sized its card for two lines. But `drawtext_text_opts` stripped every control character, the newline included, so "WHO SHOWS UP?" at `--scale 1.4` on a 1080x1920 frame rendered as "WHOSHOWS UP?" and ran off both edges.
+`graphics.py` wrapped a title that did not fit, and sized its card for two lines. But `drawtext_text_opts` stripped every control character, the newline included. So "WHO SHOWS UP?" at `--scale 1.4` on a 1080x1920 frame, wrapped as `"WHO\nSHOWS UP?"`, lost its line break and rendered on one line as "WHOSHOWS UP?", running off both edges.
 
 - The drawtext text file keeps newlines (CR and CRLF become LF). A tab, vertical tab or form feed becomes a space.
 - New `drawtext_center_align()`: `text_align=C` on FFmpeg ≥ 6.1, added to the centred title, hook and meme templates.
