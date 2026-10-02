@@ -14,7 +14,7 @@ After each merge, the remaining PRs conflict in `CHANGELOG.md` (every pair does)
 
 ---
 
-## A: `pr/graphics-wrapped-title` (1 commit)
+## A: `pr/graphics-wrapped-title` (1 commit) — #301
 
 **fix(graphics): a wrapped title is drawn on its lines**
 
@@ -29,7 +29,7 @@ After each merge, the remaining PRs conflict in `CHANGELOG.md` (every pair does)
 
 ---
 
-## B: `pr/join-no-hole` (1 commit)
+## B: `pr/join-no-hole` (1 commit) — #302
 
 **fix(join): a plain cut leaves no hole where a clip's sound outruns its picture**
 
@@ -48,7 +48,7 @@ With `--transition none`, the concat filter starts each clip after the *longer* 
 
 ---
 
-## E: `pr/loop-boomerang` (1 commit)
+## E: `pr/loop-boomerang` (1 commit) — #303
 
 **feat(loop): `--boomerang` plays a clip forward then backward**
 
