@@ -5,11 +5,14 @@ caption.py --transcribe calls, with --engine and --model set explicitly and --la
 so each number is what a user of this checkout gets (audio extraction, model load and the
 engine's own long-form handling included).
 
-  python3 bench/asr/run.py --label m3-air [--runs 3]
-  python3 bench/asr/run.py --label m4-max-extra --configs parakeet-mlx-v3,parakeet.cpp-v3
+  caffeinate -ims python3 bench/asr/run.py --label m3-air [--runs 3]
+  caffeinate -ims python3 bench/asr/run.py --label m4-max-extra --configs parakeet-mlx-v3,parakeet.cpp-v3
 
 --configs picks configs from CONFIGS and EXTRA_CONFIGS; without it the run is exactly CONFIGS, in
 order, so machines stay comparable. Extra configs belong under their own label.
+
+On AC power only: it stops if the machine goes onto battery, because a laptop on battery
+throttles and can sleep between runs.
 
 Order: one untimed warm-up pass over every (set, config), then --runs timed passes. Every
 pass walks the sets in turn and rotates the config order, so no engine always runs on a
@@ -70,6 +73,11 @@ def sh(*cmd: str) -> str:
         return ""
 
 
+def on_battery() -> bool:
+    """A laptop on battery throttles and may sleep between runs, so its timings mean nothing."""
+    return "Battery Power" in sh("pmset", "-g", "batt")
+
+
 def machine() -> dict:
     return {
         "chip": sh("sysctl", "-n", "machdep.cpu.brand_string"),
@@ -118,6 +126,9 @@ def main() -> None:
             wav = data / f"{set_name}.wav"
             k = (rep + s_i) % len(configs)
             for name in configs[k:] + configs[:k]:
+                if on_battery():
+                    sys.exit(f"on battery power: stopping before {set_name} {name} (pass {rep}). Plug in, "
+                             f"delete {out} and start again under caffeinate.")
                 engine, model = ALL_CONFIGS[name]
                 srt = out / set_name / f"{name}.srt"
                 srt.parent.mkdir(exist_ok=True)
