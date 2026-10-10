@@ -1,0 +1,703 @@
+{
+ "label": "m3-air-mc0",
+ "machine": {
+  "chip": "Apple M3",
+  "memory_gb": 16,
+  "macos": "26.7.1",
+  "power": "Now drawing from 'AC Power'",
+  "python": "3.14.8",
+  "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "whisper_cpp": "whisper.cpp 1.9.5",
+  "parakeet_mlx": "parakeet-mlx v0.5.2",
+  "skill_commit": "04f4d88",
+  "note": "raw whisper-cli A/B of -mc 0; one pass; WER only"
+ },
+ "cells": [
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-base",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 6.59,
+   "sub": 84,
+   "dele": 11,
+   "ins": 12,
+   "ref_words": 1623,
+   "median_s": 12.91,
+   "rtfx": 46.3,
+   "spread_s": [
+    12.91
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 5.79,
+   "sub": 69,
+   "dele": 14,
+   "ins": 11,
+   "ref_words": 1623,
+   "median_s": 11.78,
+   "rtfx": 50.8,
+   "spread_s": [
+    11.78
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-small",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 3.45,
+   "sub": 45,
+   "dele": 8,
+   "ins": 3,
+   "ref_words": 1623,
+   "median_s": 28.68,
+   "rtfx": 20.8,
+   "spread_s": [
+    28.68
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 3.7,
+   "sub": 44,
+   "dele": 10,
+   "ins": 6,
+   "ref_words": 1623,
+   "median_s": 26.28,
+   "rtfx": 22.8,
+   "spread_s": [
+    26.28
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 2.53,
+   "sub": 28,
+   "dele": 5,
+   "ins": 8,
+   "ref_words": 1623,
+   "median_s": 55.56,
+   "rtfx": 10.8,
+   "spread_s": [
+    55.56
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 597.9,
+   "runs": 1,
+   "errors": [],
+   "wer": 2.03,
+   "sub": 24,
+   "dele": 5,
+   "ins": 4,
+   "ref_words": 1623,
+   "median_s": 48.1,
+   "rtfx": 12.4,
+   "spread_s": [
+    48.1
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-base",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 38.05,
+   "sub": 156,
+   "dele": 361,
+   "ins": 23,
+   "ref_words": 1419,
+   "median_s": 8.92,
+   "rtfx": 55.7,
+   "spread_s": [
+    8.92
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 38.34,
+   "sub": 260,
+   "dele": 213,
+   "ins": 71,
+   "ref_words": 1419,
+   "median_s": 19.58,
+   "rtfx": 25.4,
+   "spread_s": [
+    19.58
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-small",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 47.92,
+   "sub": 74,
+   "dele": 595,
+   "ins": 11,
+   "ref_words": 1419,
+   "median_s": 16.76,
+   "rtfx": 29.7,
+   "spread_s": [
+    16.76
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 32.91,
+   "sub": 115,
+   "dele": 327,
+   "ins": 25,
+   "ref_words": 1419,
+   "median_s": 31.77,
+   "rtfx": 15.6,
+   "spread_s": [
+    31.77
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 25.72,
+   "sub": 156,
+   "dele": 145,
+   "ins": 64,
+   "ref_words": 1419,
+   "median_s": 79.23,
+   "rtfx": 6.3,
+   "spread_s": [
+    79.23
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 497.0,
+   "runs": 1,
+   "errors": [],
+   "wer": 27.55,
+   "sub": 148,
+   "dele": 207,
+   "ins": 36,
+   "ref_words": 1419,
+   "median_s": 62.84,
+   "rtfx": 7.9,
+   "spread_s": [
+    62.84
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-base",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 22.84,
+   "sub": 172,
+   "dele": 90,
+   "ins": 126,
+   "ref_words": 1699,
+   "median_s": 19.17,
+   "rtfx": 31.0,
+   "spread_s": [
+    19.17
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 18.72,
+   "sub": 145,
+   "dele": 95,
+   "ins": 78,
+   "ref_words": 1699,
+   "median_s": 17.62,
+   "rtfx": 33.7,
+   "spread_s": [
+    17.62
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-small",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 16.36,
+   "sub": 98,
+   "dele": 104,
+   "ins": 76,
+   "ref_words": 1699,
+   "median_s": 39.55,
+   "rtfx": 15.0,
+   "spread_s": [
+    39.55
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 17.42,
+   "sub": 100,
+   "dele": 116,
+   "ins": 80,
+   "ref_words": 1699,
+   "median_s": 47.3,
+   "rtfx": 12.5,
+   "spread_s": [
+    47.3
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 188.76,
+   "sub": 812,
+   "dele": 39,
+   "ins": 2356,
+   "ref_words": 1699,
+   "median_s": 126.16,
+   "rtfx": 4.7,
+   "spread_s": [
+    126.16
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 593.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 13.42,
+   "sub": 70,
+   "dele": 108,
+   "ins": 50,
+   "ref_words": 1699,
+   "median_s": 70.41,
+   "rtfx": 8.4,
+   "spread_s": [
+    70.41
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-base",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 15.96,
+   "sub": 167,
+   "dele": 73,
+   "ins": 63,
+   "ref_words": 1899,
+   "median_s": 18.88,
+   "rtfx": 31.6,
+   "spread_s": [
+    18.88
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 17.48,
+   "sub": 149,
+   "dele": 124,
+   "ins": 59,
+   "ref_words": 1899,
+   "median_s": 15.77,
+   "rtfx": 37.9,
+   "spread_s": [
+    15.77
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-small",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 14.43,
+   "sub": 134,
+   "dele": 88,
+   "ins": 52,
+   "ref_words": 1899,
+   "median_s": 33.69,
+   "rtfx": 17.7,
+   "spread_s": [
+    33.69
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 15.06,
+   "sub": 136,
+   "dele": 95,
+   "ins": 55,
+   "ref_words": 1899,
+   "median_s": 33.69,
+   "rtfx": 17.7,
+   "spread_s": [
+    33.69
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 13.16,
+   "sub": 120,
+   "dele": 73,
+   "ins": 57,
+   "ref_words": 1899,
+   "median_s": 70.39,
+   "rtfx": 8.5,
+   "spread_s": [
+    70.39
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 597.4,
+   "runs": 1,
+   "errors": [],
+   "wer": 14.11,
+   "sub": 115,
+   "dele": 111,
+   "ins": 42,
+   "ref_words": 1899,
+   "median_s": 54.32,
+   "rtfx": 11.0,
+   "spread_s": [
+    54.32
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-base",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 10.39,
+   "sub": 67,
+   "dele": 72,
+   "ins": 21,
+   "ref_words": 1540,
+   "median_s": 11.75,
+   "rtfx": 51.8,
+   "spread_s": [
+    11.75
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 8.64,
+   "sub": 73,
+   "dele": 33,
+   "ins": 27,
+   "ref_words": 1540,
+   "median_s": 10.91,
+   "rtfx": 55.8,
+   "spread_s": [
+    10.91
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-small",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 7.47,
+   "sub": 62,
+   "dele": 25,
+   "ins": 28,
+   "ref_words": 1540,
+   "median_s": 26.74,
+   "rtfx": 22.8,
+   "spread_s": [
+    26.74
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 7.34,
+   "sub": 58,
+   "dele": 27,
+   "ins": 28,
+   "ref_words": 1540,
+   "median_s": 25.31,
+   "rtfx": 24.0,
+   "spread_s": [
+    25.31
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 8.38,
+   "sub": 49,
+   "dele": 57,
+   "ins": 23,
+   "ref_words": 1540,
+   "median_s": 62.95,
+   "rtfx": 9.7,
+   "spread_s": [
+    62.95
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 608.3,
+   "runs": 1,
+   "errors": [],
+   "wer": 5.91,
+   "sub": 47,
+   "dele": 25,
+   "ins": 19,
+   "ref_words": 1540,
+   "median_s": 53.23,
+   "rtfx": 11.4,
+   "spread_s": [
+    53.23
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-base",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 32.29,
+   "sub": 141,
+   "dele": 144,
+   "ins": 45,
+   "ref_words": 1022,
+   "median_s": 10.28,
+   "rtfx": 58.3,
+   "spread_s": [
+    10.28
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-base-mc0",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 26.03,
+   "sub": 158,
+   "dele": 59,
+   "ins": 49,
+   "ref_words": 1022,
+   "median_s": 11.07,
+   "rtfx": 54.2,
+   "spread_s": [
+    11.07
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-small",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 16.44,
+   "sub": 106,
+   "dele": 47,
+   "ins": 15,
+   "ref_words": 1022,
+   "median_s": 29.77,
+   "rtfx": 20.1,
+   "spread_s": [
+    29.77
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-small-mc0",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 19.28,
+   "sub": 110,
+   "dele": 65,
+   "ins": 22,
+   "ref_words": 1022,
+   "median_s": 25.39,
+   "rtfx": 23.6,
+   "spread_s": [
+    25.39
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 231.7,
+   "sub": 637,
+   "dele": 2,
+   "ins": 1729,
+   "ref_words": 1022,
+   "median_s": 96.28,
+   "rtfx": 6.2,
+   "spread_s": [
+    96.28
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-large-v3-turbo-mc0",
+   "audio_s": 599.5,
+   "runs": 1,
+   "errors": [],
+   "wer": 13.8,
+   "sub": 81,
+   "dele": 45,
+   "ins": 15,
+   "ref_words": 1022,
+   "median_s": 61.91,
+   "rtfx": 9.7,
+   "spread_s": [
+    61.91
+   ],
+   "engine_ran": "whisper.cpp"
+  }
+ ],
+ "overall": {
+  "whisper.cpp-base": {
+   "wer": 19.87,
+   "audio_s": 3493.4,
+   "time_s": 81.9,
+   "rtfx": 42.6
+  },
+  "whisper.cpp-base-mc0": {
+   "wer": 18.33,
+   "audio_s": 3493.4,
+   "time_s": 86.7,
+   "rtfx": 40.3
+  },
+  "whisper.cpp-small": {
+   "wer": 17.07,
+   "audio_s": 3493.4,
+   "time_s": 175.2,
+   "rtfx": 19.9
+  },
+  "whisper.cpp-small-mc0": {
+   "wer": 15.42,
+   "audio_s": 3493.4,
+   "time_s": 189.7,
+   "rtfx": 18.4
+  },
+  "whisper.cpp-large-v3-turbo": {
+   "wer": 69.12,
+   "audio_s": 3493.4,
+   "time_s": 490.6,
+   "rtfx": 7.1
+  },
+  "whisper.cpp-large-v3-turbo-mc0": {
+   "wer": 12.52,
+   "audio_s": 3493.4,
+   "time_s": 350.8,
+   "rtfx": 10.0
+  }
+ }
+}

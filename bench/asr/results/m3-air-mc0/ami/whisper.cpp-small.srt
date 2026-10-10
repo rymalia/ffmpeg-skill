@@ -1,0 +1,464 @@
+1
+00:00:00,000 --> 00:00:06,200
+ And an additional 80% indicated that it would spend more money on a fancy-looking remote control
+
+2
+00:00:06,920 --> 00:00:12,920
+ Which basically has these contacts that are really close together, and then when you press down on the rubber button
+
+3
+00:00:14,160 --> 00:00:20,600
+ So I just wanted to interject this here, so we're not getting too much of track here with with the things we want to look at
+
+4
+00:00:28,680 --> 00:00:35,200
+ Like you have an icon or something you have is a good example of GUI graphic user interface
+
+5
+00:00:35,760 --> 00:00:40,760
+ And we've talked about there being an alarm or something a beeping for being lost
+
+6
+00:00:43,040 --> 00:00:49,280
+ We can customize the two circuits for different type of buttons like you are keeping the standard buttons on the top and the more complex button
+
+7
+00:00:53,640 --> 00:01:00,080
+ I can just create whatever file it's going to be in every single dialogue that stops your statement and
+
+8
+00:01:01,040 --> 00:01:03,040
+ So everybody's top like that statement
+
+9
+00:01:04,720 --> 00:01:11,000
+ Because when you when you are building some circuits some circuits and also wires
+
+10
+00:01:11,720 --> 00:01:18,280
+ Like at the remote control which we use for TV. It should it should be used for some other purpose also
+
+11
+00:01:19,600 --> 00:01:22,280
+ The users of 46 to 65 years
+
+12
+00:01:23,160 --> 00:01:30,800
+ Consent they make up 40% of the market is after if you look in the newspaper TV guide or any TV guide
+
+13
+00:01:34,360 --> 00:01:39,020
+ They did have all that it was sort of built in and just had some trouble getting it running properly
+
+14
+00:01:40,120 --> 00:01:42,880
+ Hey, we could we could photocopy our assignment
+
+15
+00:01:47,200 --> 00:01:53,440
+ They can load each for all of the whole up and do a search over the whole lot to find who bothers by doing what no problem or what topics we're in what I
+
+16
+00:01:54,440 --> 00:01:56,560
+ Mean with the intention that
+
+17
+00:01:57,120 --> 00:01:58,520
+ This is done
+
+18
+00:01:58,520 --> 00:02:01,840
+ The colors are bright and warm and we really did a great job there
+
+19
+00:02:02,920 --> 00:02:04,920
+ Yeah, we will probably have you
+
+20
+00:02:11,400 --> 00:02:15,000
+ Well, it wouldn't show up on the search results if it didn't exist together
+
+21
+00:02:17,200 --> 00:02:19,200
+ Did you have you made it another?
+
+22
+00:02:21,240 --> 00:02:23,240
+ I think there is
+
+23
+00:02:29,640 --> 00:02:31,640
+ So the interface
+
+24
+00:02:32,800 --> 00:02:34,800
+ And then that way we could even pre-process
+
+25
+00:02:37,120 --> 00:02:40,880
+ But I don't don't know if it's cheaper
+
+26
+00:02:45,640 --> 00:02:49,080
+ Like you have got a signal by pressing a button
+
+27
+00:02:50,080 --> 00:02:53,720
+ Otherwise photo shop has a lot of windows. Do you ever use Photoshop? It's got loads
+
+28
+00:02:54,160 --> 00:02:57,520
+ Like when he was talking about like have an architecture that things are gonna plug into
+
+29
+00:02:59,560 --> 00:03:01,560
+ Yeah, I mean it doesn't have to be
+
+30
+00:03:03,120 --> 00:03:05,120
+ To make this
+
+31
+00:03:13,800 --> 00:03:16,560
+ It's gonna be a page it's pretty different
+
+32
+00:03:28,080 --> 00:03:31,720
+ Like you can have the numbers one two three four up to nine
+
+33
+00:03:37,120 --> 00:03:39,120
+ Right not a seagull
+
+34
+00:03:40,760 --> 00:03:47,180
+ Keep the inner working simple, so it's robust no topic specified. Yeah, I have a default
+
+35
+00:03:49,200 --> 00:03:51,400
+ But only I'll need to have done all of this stuff
+
+36
+00:03:55,560 --> 00:03:57,560
+ Purely a formality
+
+37
+00:03:57,720 --> 00:03:59,720
+ Yeah
+
+38
+00:04:00,440 --> 00:04:03,840
+ We could put it in a set in a package. Yeah
+
+39
+00:04:04,880 --> 00:04:06,880
+ because you
+
+40
+00:04:09,600 --> 00:04:16,040
+ And of course a circuit board no, it's not very handy, I think do we have too many functions
+
+41
+00:04:20,280 --> 00:04:22,280
+ Yeah
+
+42
+00:04:25,880 --> 00:04:28,120
+ Well, yeah, that's always gonna be the case of search
+
+43
+00:04:31,480 --> 00:04:33,480
+ Well, that's in on the 18th
+
+44
+00:04:34,280 --> 00:04:38,560
+ How can you get range of people if you have three and you would yeah
+
+45
+00:04:40,440 --> 00:04:42,440
+ It's true
+
+46
+00:04:42,800 --> 00:04:47,360
+ They're not really very interested in features this week's only two days old
+
+47
+00:04:48,760 --> 00:04:53,600
+ Browsing sort of thing. It's just tell you who participated
+
+48
+00:04:55,720 --> 00:05:01,260
+ Can we and you're front scene right about functional requirements
+
+49
+00:05:05,600 --> 00:05:07,600
+ Yeah
+
+50
+00:05:10,600 --> 00:05:15,600
+ Yeah, so they just next it's pretty crude anyway, that's just looking for
+
+51
+00:05:27,600 --> 00:05:32,040
+ I'm supposed to make a little presentation on it, but that's after it's financing
+
+52
+00:05:33,280 --> 00:05:36,640
+ My remote control tends to follow a lot. Okay
+
+53
+00:05:39,080 --> 00:05:41,080
+ Yeah
+
+54
+00:05:44,400 --> 00:05:46,800
+ Was there anything else we wanted to add to the timeline
+
+55
+00:06:01,200 --> 00:06:05,920
+ But I think you can yeah, I don't think Java knows how to do that
+
+56
+00:06:09,080 --> 00:06:11,080
+ And there was supposed to be women
+
+57
+00:06:15,200 --> 00:06:17,200
+ Yeah, it was
+
+58
+00:06:26,680 --> 00:06:28,680
+ That's the price
+
+59
+00:06:31,440 --> 00:06:33,440
+ Okay
+
+60
+00:06:34,760 --> 00:06:39,320
+ Blop of text goals or something okay. Yeah
+
+61
+00:07:05,320 --> 00:07:07,320
+ I
+
+62
+00:07:08,920 --> 00:07:13,280
+ Respect respect to keep the remote. There we go
+
+63
+00:07:14,440 --> 00:07:16,440
+ You don't know me and
+
+64
+00:07:18,240 --> 00:07:21,440
+ I'll give you the three then
+
+65
+00:07:27,840 --> 00:07:29,840
+ Yes
+
+66
+00:07:35,400 --> 00:07:37,400
+ That's a good idea
+
+67
+00:07:41,320 --> 00:07:43,320
+ Okay
+
+68
+00:08:05,760 --> 00:08:08,400
+ Nine channel switches battery
+
+69
+00:08:11,440 --> 00:08:13,440
+ I'll go away
+
+70
+00:08:17,200 --> 00:08:23,720
+ This was that's a good point. No, that's not gonna work. Mmm. I
+
+71
+00:08:24,920 --> 00:08:26,920
+ Can sit down I think
+
+72
+00:08:35,720 --> 00:08:37,720
+ Oh
+
+73
+00:08:38,160 --> 00:08:41,280
+ It's not that many if you want to change my code
+
+74
+00:09:00,520 --> 00:09:02,520
+ Okay, right
+
+75
+00:09:05,360 --> 00:09:08,200
+ Mm-hmm. Yeah
+
+76
+00:09:10,160 --> 00:09:15,200
+ It looks too cozy two point or blue
+
+77
+00:09:19,720 --> 00:09:22,040
+ Yeah, and your name is
+
+78
+00:09:23,800 --> 00:09:26,000
+ No, no, okay
+
+79
+00:09:27,960 --> 00:09:29,960
+ So
+
+80
+00:09:35,000 --> 00:09:40,720
+ Yeah, no, that's true. Yeah
+
+81
+00:09:41,560 --> 00:09:43,560
+ Yeah, I think
+
+82
+00:09:44,400 --> 00:09:46,400
+ nice
+
+83
+00:09:47,080 --> 00:09:49,080
+ Thank you for
+
+84
+00:09:50,000 --> 00:09:52,000
+ Whatever
+
+85
+00:09:52,480 --> 00:09:54,480
+ Cool cool, I mean
+
+86
+00:10:03,200 --> 00:10:05,200
+ Yeah
+
+87
+00:10:07,360 --> 00:10:09,360
+ Okay
+
+88
+00:10:19,400 --> 00:10:21,640
+ Nice, okay, right
+
+89
+00:10:26,240 --> 00:10:28,240
+ Okay
+
+90
+00:10:28,920 --> 00:10:30,920
+ Yeah
+
+91
+00:10:31,520 --> 00:10:33,720
+ It's rubber. Yeah
+
+92
+00:10:37,000 --> 00:10:39,000
+ The first
+
+93
+00:10:42,360 --> 00:10:44,360
+ Yeah
+
+94
+00:10:46,480 --> 00:10:49,640
+ But quick ready. Yeah
+
+95
+00:11:00,080 --> 00:11:02,080
+ Okay
+
+96
+00:11:07,920 --> 00:11:09,920
+ Yeah, okay, yeah
+
+97
+00:11:10,880 --> 00:11:13,840
+ Numbers today. Yeah
+
+98
+00:11:16,080 --> 00:11:18,080
+ No
+
+99
+00:11:26,760 --> 00:11:28,760
+ Yeah
+
+100
+00:11:30,080 --> 00:11:32,080
+ Yeah
+
+101
+00:11:35,960 --> 00:11:37,960
+ Mm-hmm
+
+102
+00:11:39,600 --> 00:11:45,400
+ Hey, yes, pardon me. Mm-hmm. Mm-hmm. Yeah
+
+103
+00:11:47,120 --> 00:11:49,120
+ Yeah, okay
+
+104
+00:11:55,640 --> 00:11:57,640
+ Yeah
+
+105
+00:11:57,720 --> 00:11:58,880
+ Yeah
+
+106
+00:11:58,880 --> 00:12:00,880
+ Yeah
+
+107
+00:12:02,080 --> 00:12:04,080
+ Yeah
+
+108
+00:12:04,200 --> 00:12:06,200
+ Yeah
+
+109
+00:12:06,240 --> 00:12:08,240
+ All right
+
+110
+00:12:09,400 --> 00:12:11,400
+ Yeah, yeah
+
+111
+00:12:12,720 --> 00:12:14,720
+ Okay, yeah
+
+112
+00:12:20,240 --> 00:12:22,240
+ Take
+
+113
+00:12:29,600 --> 00:12:31,600
+ Yeah
+
+114
+00:12:44,960 --> 00:12:46,960
+ Yeah
+
+115
+00:12:48,680 --> 00:12:52,400
+ Yeah, but yeah, yeah
+
+116
+00:12:58,880 --> 00:13:01,880
+ Yeah. Yeah.
+

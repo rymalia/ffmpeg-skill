@@ -1,0 +1,12 @@
+{
+ "chip": "Apple M3",
+ "memory_gb": 16,
+ "macos": "26.7.1",
+ "power": "Now drawing from 'AC Power'",
+ "python": "3.14.8",
+ "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+ "whisper_cpp": "whisper.cpp 1.9.5",
+ "parakeet_mlx": "parakeet-mlx v0.5.2",
+ "skill_commit": "04f4d88",
+ "note": "raw whisper-cli A/B of -mc 0; one pass; WER only"
+}

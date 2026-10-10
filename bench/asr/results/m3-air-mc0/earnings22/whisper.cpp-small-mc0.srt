@@ -1,0 +1,812 @@
+1
+00:00:00,000 --> 00:00:08,320
+ Yes, for the changes in our production plans, excluding unpredictable events, those related
+
+2
+00:00:08,320 --> 00:00:16,320
+ to nature and random events, we do not plan any changes here in terms of our production.
+
+3
+00:00:16,320 --> 00:00:20,880
+ And we have already seen the first outcomes.
+
+4
+00:00:20,880 --> 00:00:29,520
+ We were able to reduce energy consumption with the same production parameters as we used
+
+5
+00:00:29,520 --> 00:00:36,640
+ to have. And most importantly, a year into our partnership with GA, we couldn't feel
+
+6
+00:00:36,640 --> 00:00:42,040
+ any better about our collective progress, including the performance of management, the profitability
+
+7
+00:00:42,040 --> 00:00:47,880
+ of our stake, scaling of the AUM, and the integration of our teams.
+
+8
+00:00:47,880 --> 00:00:54,200
+ I will pass it on to Lisa to comment on margin, but just to clarify my comment, I said when
+
+9
+00:00:54,200 --> 00:01:02,920
+ We passed prices, we passed on prices to make sure that we protect our...
+
+10
+00:01:02,920 --> 00:01:09,840
+ This is again a first step into a continued modernization journey for our entertainment
+
+11
+00:01:09,840 --> 00:01:17,800
+ business that again in the end should be able to stabilize the total TV line over time.
+
+12
+00:01:17,800 --> 00:01:22,720
+ And really the key for us is to take our leading position there with our leading position across
+
+13
+00:01:22,720 --> 00:01:26,480
+ infrastructure, real estate, credit growth, equity on a global base, and the
+
+14
+00:01:26,480 --> 00:01:29,840
+ marriage of those two things. And we think that could lead to a lot of growth
+
+15
+00:01:29,840 --> 00:01:33,960
+ for us in that part of the world. You know, I think the big advantage here is
+
+16
+00:01:33,960 --> 00:01:40,680
+ we come into 2022 with over $15 billion of embedded revenue that sits in our
+
+17
+00:01:40,680 --> 00:01:44,960
+ balance sheet between gross and realized carry and the embedded gains of our
+
+18
+00:01:44,960 --> 00:01:54,560
+ investment portfolio. So from now on any update will be called patch and if
+
+19
+00:01:54,560 --> 00:02:01,480
+ there will be any hot fixes. So going from a quite significant negative trend
+
+20
+00:02:01,480 --> 00:02:07,280
+ in B2B to being a stable business was what we said we would do and we've done
+
+21
+00:02:07,280 --> 00:02:11,480
+ it. Ladies and gentlemen the subject you have brought up concerns one of the
+
+22
+00:02:11,480 --> 00:02:21,420
+ assets which is now in the process of sale so and if you see any major impact
+
+23
+00:02:21,420 --> 00:02:27,420
+ to the the product that you and your peers are providing to insurance
+
+24
+00:02:27,420 --> 00:02:35,300
+ clients market Latin America reported 8% organic growth of which
+
+25
+00:02:35,300 --> 00:02:39,500
+ which approximately one-third came from Europe rising.
+
+26
+00:02:39,500 --> 00:02:44,500
+ In Sweden consumer, we continued our more and more strategy and so strong performance
+
+27
+00:02:44,500 --> 00:02:49,140
+ within mobile post-paid and fixed broadband, while we were able to mitigate the decline
+
+28
+00:02:49,140 --> 00:02:51,540
+ in digital TV.
+
+29
+00:02:51,540 --> 00:02:54,340
+ But you are right, it's still a very volatile environment.
+
+30
+00:02:54,340 --> 00:03:00,700
+ So I think we're only, let's say, three months into the year of 12 months.
+
+31
+00:03:00,700 --> 00:03:10,700
+ But one of the things he brings is a deep understanding not only of mobile markets and not only of broadband markets, but also the TV side of the business.
+
+32
+00:03:10,700 --> 00:03:20,700
+ So I would be happy to find out what is the management board's view of what the value might be in the third quarter on the second half of the year.
+
+33
+00:03:20,700 --> 00:03:27,380
+ Because as you think, especially as Global Atlantic pursues block activity, we're bringing
+
+34
+00:03:27,380 --> 00:03:32,300
+ on more assets and then those blocks need to be rotated themselves.
+
+35
+00:03:32,300 --> 00:03:38,740
+ And then of course it will, it will vary over time where the biggest contribution comes
+
+36
+00:03:38,740 --> 00:03:39,740
+ from.
+
+37
+00:03:39,740 --> 00:03:46,820
+ That, our international transactions increased 120 percent sequentially, coming from various
+
+38
+00:03:46,820 --> 00:03:57,580
+ level. That is, will one of change in next year's dividend or not? We close the quarter
+
+39
+00:03:57,580 --> 00:04:11,100
+ with a solid cash position of $276 million. Nothing bombastic, so to say.
+
+40
+00:04:11,100 --> 00:04:29,420
+ and then I wonder what this implies for the HMO revenue in the quarter, meaning that if
+
+41
+00:04:29,420 --> 00:04:36,880
+ orders were to grow around 100, structural cost should be growing no more than 40%.
+
+42
+00:04:36,880 --> 00:04:42,360
+ And this is one of the sunniest places in the world, and on the top of it, it is completely
+
+43
+00:04:42,360 --> 00:04:43,360
+ empty.
+
+44
+00:04:43,360 --> 00:04:49,120
+ Mobile net intake continued to be strong in the quarter, driven by new contracts, both
+
+45
+00:04:49,120 --> 00:04:51,360
+ within SME and large segments.
+
+46
+00:04:51,360 --> 00:05:05,800
+ The next from Lukasz Kosciarski PKL, how many large patches do you plan to release in the
+
+47
+00:05:05,800 --> 00:05:09,480
+ next two or three months to get that detail?
+
+48
+00:05:09,480 --> 00:05:14,440
+ Well, it of course depends on whether we know the full magnitude of the headwinds at this
+
+49
+00:05:14,440 --> 00:05:15,440
+ point in time.
+
+50
+00:05:15,440 --> 00:05:23,640
+ So, planned health and HMOs, as I understand, human health is just a one-time benefit there.
+
+51
+00:05:23,640 --> 00:05:29,440
+ Our cooperation with distributors and the retail stores which keep selling the game.
+
+52
+00:05:29,440 --> 00:05:31,440
+ Content.
+
+53
+00:05:31,440 --> 00:05:33,440
+ Grade.
+
+54
+00:05:33,440 --> 00:05:35,440
+ Grade, okay.
+
+55
+00:05:35,440 --> 00:05:40,440
+ Before we begin, please take notice of the safe hardware statement on slide 2.
+
+56
+00:05:40,440 --> 00:05:45,560
+ If you included global Atlantic in that number we'd be a little bit below seven billion dollars of deployment for the year
+
+57
+00:05:46,000 --> 00:05:51,320
+ As a result of this year, we generate a financial surplus, which is then brought back to Poland
+
+58
+00:05:51,760 --> 00:05:56,200
+ And outside the US it's a global private banks and the regional private banks
+
+59
+00:05:57,560 --> 00:06:01,040
+ The contribution from Europe pricing was insignificant
+
+60
+00:06:03,720 --> 00:06:08,400
+ And decommissioning our remaining IT stacks once we have migrated all customers
+
+61
+00:06:09,000 --> 00:06:14,000
+ So that whole planning has a significant efficiency in it.
+
+62
+00:06:14,000 --> 00:06:17,000
+ Algorithms.
+
+63
+00:06:17,000 --> 00:06:20,000
+ Now please turn to slideshow.
+
+64
+00:06:20,000 --> 00:06:25,000
+ Note that this quarter we also saw lower cancellations.
+
+65
+00:06:25,000 --> 00:06:31,000
+ 2020 was the first year for which the dividend was paid after a long break.
+
+66
+00:06:31,000 --> 00:06:35,000
+ If your question has been addressed, you might remove yourself from queue.
+
+67
+00:06:35,000 --> 00:06:37,000
+ Please press star then 2.
+
+68
+00:06:37,000 --> 00:06:43,000
+ Do you think that in Sweden it will be similar the increase this year to last year?
+
+69
+00:06:43,000 --> 00:06:48,000
+ And as a reminder, eight of our 21 offices are in the region.
+
+70
+00:06:48,000 --> 00:06:54,000
+ And the last question comes from a line of Abilash Mohapatra from Bernberg Banksy.
+
+71
+00:06:54,000 --> 00:07:00,000
+ So let's move over to Sweden consumer slide five.
+
+72
+00:07:00,000 --> 00:07:05,000
+ We were prepared just to say that the next batch, not the biggest one.
+
+73
+00:07:05,000 --> 00:07:11,000
+ That's as much as we can say the decision will be announced when it's ready to be announced.
+
+74
+00:07:11,000 --> 00:07:16,000
+ Is that something that you're comfortable with?
+
+75
+00:07:16,000 --> 00:07:20,000
+ We're having some problems with the webcast everyone.
+
+76
+00:07:20,000 --> 00:07:24,000
+ And so I think about that on a blended basis of about three years then.
+
+77
+00:07:24,000 --> 00:07:26,000
+ Question.
+
+78
+00:07:26,000 --> 00:07:28,000
+ Hey, good morning everybody.
+
+79
+00:07:28,000 --> 00:07:34,000
+ You know, we only began accepting capital in June and we think we've got plans in place
+
+80
+00:07:34,000 --> 00:07:36,800
+ to be able to do that.
+
+81
+00:07:36,800 --> 00:07:39,520
+ So let's not overdo the sales and marketing.
+
+82
+00:07:39,520 --> 00:07:40,520
+ Light.
+
+83
+00:07:40,520 --> 00:07:41,520
+ Yes.
+
+84
+00:07:41,520 --> 00:07:48,040
+ So we should call it current gen, you know, the PS4 version.
+
+85
+00:07:48,040 --> 00:07:51,320
+ And the Baltics is also under control, but we'll have a higher level.
+
+86
+00:07:51,320 --> 00:07:54,800
+ Yes, to put volatility into perspective.
+
+87
+00:07:54,800 --> 00:08:03,280
+ Thanks. Thank you. Thank you. And with that, I'll turn the call over to Rob. Thank you.
+
+88
+00:08:03,280 --> 00:08:09,000
+ Is this a concern at all in either segment? B2B used to be very volume driven. Go back
+
+89
+00:08:09,000 --> 00:08:10,160
+ in time. Now...
+
+90
+00:08:10,160 --> 00:08:14,300
+ I don't know how you're going to actually develop that.
+
+91
+00:08:14,300 --> 00:08:18,240
+ Dear participants, we will now begin the question and answer session.
+
+92
+00:08:18,240 --> 00:08:22,200
+ I hope that that gives you a clear sense of the importance for us.
+
+93
+00:08:22,200 --> 00:08:26,220
+ So maybe help me understand how strong that number is.
+
+94
+00:08:26,220 --> 00:08:29,520
+ I have a question on mobile.
+
+95
+00:08:29,520 --> 00:08:33,280
+ And we also have two other projects.
+
+96
+00:08:33,280 --> 00:08:35,800
+ As it relates to margin, if we talked about operating
+
+97
+00:08:35,800 --> 00:08:37,040
+ in a low setting--
+
+98
+00:08:37,040 --> 00:08:39,760
+ Please proceed with your question.
+
+99
+00:08:39,760 --> 00:08:40,680
+ Hello.
+
+100
+00:08:40,680 --> 00:08:44,280
+ Simply for casual presentation.
+
+101
+00:08:44,280 --> 00:08:46,280
+ Question.
+
+102
+00:08:46,280 --> 00:08:48,040
+ OK, thanks.
+
+103
+00:08:48,040 --> 00:08:51,680
+ Now we are a Converged FMC player.
+
+104
+00:08:51,680 --> 00:08:55,320
+ At this time, all participants are in listen-only mode.
+
+105
+00:08:55,320 --> 00:08:59,400
+ That deployment does not include global Linux.
+
+106
+00:08:59,400 --> 00:09:02,600
+ Good morning, and thank you for taking my question.
+
+107
+00:09:02,600 --> 00:09:06,280
+ We deployed $23 billion in the quarter.
+
+108
+00:09:06,280 --> 00:09:09,800
+ Because these are very small businesses.
+
+109
+00:09:09,800 --> 00:09:13,440
+ And that was to prepare for the next year.
+
+110
+00:09:13,440 --> 00:09:17,000
+ That's what I can tell you right now.
+
+111
+00:09:17,000 --> 00:09:20,480
+ And this leads to some investment in the market.
+
+112
+00:09:20,480 --> 00:09:26,300
+ just two things. That was my first question. Good evening, guys.
+
+113
+00:09:26,300 --> 00:09:29,240
+ Thanks for taking the question. Hello.
+
+114
+00:09:29,240 --> 00:09:34,360
+ Please ask a question. Thanks for joining us today.
+
+115
+00:09:34,360 --> 00:09:37,920
+ Thanks for the question. Thanks, Scott and Rob.
+
+116
+00:09:37,920 --> 00:09:39,880
+ Thanks for taking my questions this morning.
+
+117
+00:09:39,880 --> 00:09:41,720
+ Are you talking about production yet?
+
+118
+00:09:41,720 --> 00:09:43,600
+ How do you see that?
+
+119
+00:09:43,600 --> 00:09:45,520
+ I cannot deny that.
+
+120
+00:09:45,520 --> 00:09:47,440
+ The cash savings, sir.
+
+121
+00:09:47,440 --> 00:09:49,440
+ Good morning.
+
+122
+00:09:49,440 --> 00:09:50,440
+ Thank you.
+
+123
+00:09:50,440 --> 00:09:52,440
+ Hey, Rob, I'm--
+
+124
+00:09:52,440 --> 00:09:54,440
+ They used to be very--
+
+125
+00:09:54,440 --> 00:09:55,440
+ Dress.
+
+126
+00:09:55,440 --> 00:09:56,440
+ Sorry.
+
+127
+00:09:56,440 --> 00:09:57,440
+ Thanks for your morning.
+
+128
+00:09:57,440 --> 00:09:58,440
+ Hope--
+
+129
+00:09:58,440 --> 00:10:00,440
+ I mean, what would drive that?
+
+130
+00:10:00,440 --> 00:10:01,440
+ Thank you.
+
+131
+00:10:01,440 --> 00:10:02,440
+ Then--
+
+132
+00:10:02,440 --> 00:10:03,440
+ I appreciate all of that.
+
+133
+00:10:03,440 --> 00:10:04,440
+ Thank you.
+
+134
+00:10:04,440 --> 00:10:05,440
+ Anything you want to add, though?
+
+135
+00:10:05,440 --> 00:10:06,440
+ Hey, Brian, it's Craig.
+
+136
+00:10:06,440 --> 00:10:07,440
+ Why don't I just--
+
+137
+00:10:07,440 --> 00:10:08,440
+ Thank you.
+
+138
+00:10:08,440 --> 00:10:09,440
+ We'll--
+
+139
+00:10:09,440 --> 00:10:11,440
+ So moving to slide two.
+
+140
+00:10:11,440 --> 00:10:12,440
+ Good morning.
+
+141
+00:10:12,440 --> 00:10:13,440
+ This is--
+
+142
+00:10:13,440 --> 00:10:14,440
+ Your line is open.
+
+143
+00:10:14,440 --> 00:10:16,440
+ Good morning, guys.
+
+144
+00:10:16,440 --> 00:10:18,440
+ >> We have visibility on that.
+
+145
+00:10:18,440 --> 00:10:19,440
+ >> Projecting for you.
+
+146
+00:10:19,440 --> 00:10:21,440
+ >> Yeah, good morning, everyone.
+
+147
+00:10:21,440 --> 00:10:22,440
+ >> This is our thing.
+
+148
+00:10:22,440 --> 00:10:23,440
+ >> Thank you very much.
+
+149
+00:10:23,440 --> 00:10:24,440
+ >> Yeah, thanks.
+
+150
+00:10:24,440 --> 00:10:26,440
+ >> Thanks for taking the question.
+
+151
+00:10:26,440 --> 00:10:28,440
+ >> I'm just going to hurt you all.
+
+152
+00:10:28,440 --> 00:10:29,440
+ >> It works really well.
+
+153
+00:10:29,440 --> 00:10:31,440
+ >> Craig, why don't I begin?
+
+154
+00:10:31,440 --> 00:10:32,440
+ >> That's my question.
+
+155
+00:10:32,440 --> 00:10:33,440
+ >> Thank you.
+
+156
+00:10:33,440 --> 00:10:35,440
+ >> We have two questions for you.
+
+157
+00:10:35,440 --> 00:10:36,440
+ >> Thanks very much.
+
+158
+00:10:36,440 --> 00:10:40,440
+ >> I just had a couple of questions for you.
+
+159
+00:10:40,440 --> 00:10:41,440
+ >> The question comes from Lion.
+
+160
+00:10:41,440 --> 00:10:43,440
+ >> So how do you see it?
+
+161
+00:10:43,440 --> 00:10:44,440
+ >> Good morning, everyone.
+
+162
+00:10:44,440 --> 00:10:58,440
+ Good morning everyone. Welcome. And then I wondered, please proceed with your question. That's very helpful. Thank you. And this too. Thanks. Okay. Thank you. We have all worked. Yeah. Thank you very much. Thank you.
+
+163
+00:10:58,440 --> 00:11:12,440
+ We have Nick Gore. That's very clear. Thank you. Okay, one by one. Please ask a question. See you. Please go ahead. Hi, Stefan. Good morning, folks. Thanks. Please proceed with your question.
+
+164
+00:11:12,440 --> 00:11:13,440
+ Oh, hey, good morning.
+
+165
+00:11:13,440 --> 00:11:14,440
+ Thanks.
+
+166
+00:11:14,440 --> 00:11:16,440
+ That's very helpful.
+
+167
+00:11:16,440 --> 00:11:18,440
+ Thank you very much.
+
+168
+00:11:18,440 --> 00:11:19,440
+ Good day to you.
+
+169
+00:11:19,440 --> 00:11:21,440
+ Please proceed with your question.
+
+170
+00:11:21,440 --> 00:11:23,440
+ Please proceed with your question.
+
+171
+00:11:23,440 --> 00:11:25,440
+ Thanks for your question.
+
+172
+00:11:25,440 --> 00:11:27,440
+ Can you repeat that?
+
+173
+00:11:27,440 --> 00:11:29,440
+ Please go ahead.
+
+174
+00:11:29,440 --> 00:11:30,440
+ Yes.
+
+175
+00:11:30,440 --> 00:11:31,440
+ Okay.
+
+176
+00:11:31,440 --> 00:11:32,440
+ Good morning.
+
+177
+00:11:32,440 --> 00:11:34,440
+ Thanks for taking my question.
+
+178
+00:11:34,440 --> 00:11:35,440
+ Thank you very much.
+
+179
+00:11:35,440 --> 00:11:36,440
+ Yes.
+
+180
+00:11:36,440 --> 00:11:37,440
+ Thank you.
+
+181
+00:11:37,440 --> 00:11:38,440
+ Sure.
+
+182
+00:11:38,440 --> 00:11:39,440
+ Okay.
+
+183
+00:11:39,440 --> 00:11:41,440
+ Okay.
+
+184
+00:11:41,440 --> 00:11:43,440
+ Rob, you want to pick up on this?
+
+185
+00:11:43,440 --> 00:11:45,440
+ Two as well.
+
+186
+00:11:45,440 --> 00:11:46,440
+ And now, Alberto.
+
+187
+00:11:46,440 --> 00:11:48,440
+ Thank you very much.
+
+188
+00:11:48,440 --> 00:11:50,440
+ Guys, thank you very much.
+
+189
+00:11:50,440 --> 00:11:51,440
+ Thank you.
+
+190
+00:11:51,440 --> 00:11:52,440
+ Thank you very much.
+
+191
+00:11:52,440 --> 00:11:54,440
+ Thank you very much, Paul.
+
+192
+00:11:54,440 --> 00:11:55,440
+ Good morning.
+
+193
+00:11:55,440 --> 00:11:56,440
+ Thanks very much.
+
+194
+00:11:56,440 --> 00:11:57,440
+ Thanks.
+
+195
+00:11:57,440 --> 00:11:58,440
+ Thank you.
+
+196
+00:11:58,440 --> 00:11:59,440
+ Second part.
+
+197
+00:11:59,440 --> 00:12:00,440
+ Yeah.
+
+198
+00:12:00,440 --> 00:12:01,440
+ Thank you for your part.
+
+199
+00:12:01,440 --> 00:12:03,440
+ Good afternoon.
+
+200
+00:12:03,440 --> 00:12:04,440
+ Hello.
+
+201
+00:12:04,440 --> 00:12:06,440
+ Thanks for all that.
+
+202
+00:12:06,440 --> 00:12:07,440
+ What do you mean?
+
+203
+00:12:07,440 --> 00:12:10,520
+ Thank you, and take care.
+

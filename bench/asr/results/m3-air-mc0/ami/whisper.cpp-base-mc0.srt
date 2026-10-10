@@ -1,0 +1,704 @@
+1
+00:00:00,000 --> 00:00:06,140
+ And an additional 80% indicated that it would spend more money on a fancy looking remote control
+
+2
+00:00:06,900 --> 00:00:12,680
+ Which basically has these contacts that are really close together and then when you press down on the rubber button
+
+3
+00:00:14,160 --> 00:00:20,620
+ So I just wanted to check this here so we're not getting too much of track here with with the things we want to look at
+
+4
+00:00:27,440 --> 00:00:34,540
+ Like you have a known icons or something, you have is a good example of GU and graphic
+
+5
+00:00:34,540 --> 00:00:35,540
+ user interface.
+
+6
+00:00:35,540 --> 00:00:43,540
+ And we've talked about there being an alarm or something, a B-Ping for being last.
+
+7
+00:00:43,540 --> 00:00:46,980
+ We can customize the two circuits for different type of buttons, like we are keeping the standard
+
+8
+00:00:46,980 --> 00:00:50,940
+ buttons on the top and the more complex buttons in this thing.
+
+9
+00:00:50,940 --> 00:00:58,820
+ the process. It's going to create whatever file is going to be in every single dialog that
+
+10
+00:00:58,820 --> 00:01:05,200
+ starts with statement. So everybody's top dialog statement.
+
+11
+00:01:05,200 --> 00:01:13,780
+ Because when you are building some circuits and also wires, like the remote control which
+
+12
+00:01:13,780 --> 00:01:20,080
+ which we used for TV. It should be used for some other purpose also.
+
+13
+00:01:20,080 --> 00:01:26,340
+ The users of 46 to 65 years, they make up 40% of the market.
+
+14
+00:01:26,340 --> 00:01:34,840
+ Is after, if you look in the newspaper, TV guide or any TV guide, there's a price?
+
+15
+00:01:34,840 --> 00:01:38,780
+ They did have all that and it was sort of built in and just had some trouble getting it,
+
+16
+00:01:38,780 --> 00:01:39,780
+ running properly.
+
+17
+00:01:39,780 --> 00:01:42,880
+ Hey, we could we could put a cop your assignment
+
+18
+00:01:47,260 --> 00:01:52,780
+ They can load each we're all of the whole up and down search over the whole lot to find he bothers by whom what no problem or what topics
+
+19
+00:01:54,280 --> 00:01:57,960
+ I mean with the intention that this is done
+
+20
+00:01:58,660 --> 00:02:01,820
+ The colors are bright and warm and we really do a great job there
+
+21
+00:02:02,940 --> 00:02:04,940
+ Yeah, we will probably
+
+22
+00:02:09,780 --> 00:02:16,260
+ well, it wouldn't show up on the search results if it didn't exist together.
+
+23
+00:02:16,260 --> 00:02:21,620
+ So is there, did you, have you made another embasset?
+
+24
+00:02:21,620 --> 00:02:24,820
+ I think there is.
+
+25
+00:02:24,820 --> 00:02:35,180
+ No, no, yes, just, um, so the interface, and then that way we could even pre-process
+
+26
+00:02:35,180 --> 00:02:46,180
+ but I don't know if it's steeper. I think it will give you the most relevant result.
+
+27
+00:02:46,180 --> 00:02:50,180
+ Like you have got a signal by pressing a button.
+
+28
+00:02:50,180 --> 00:02:54,180
+ So if I had to shut down a lot of windows, do you have these fight shops got loads?
+
+29
+00:02:54,180 --> 00:02:59,180
+ Like when he was talking about like having architecture that things are going to plug into?
+
+30
+00:02:59,180 --> 00:03:03,180
+ Yeah, I mean it doesn't have to be that.
+
+31
+00:03:03,180 --> 00:03:10,940
+ to make this slide, and that would populate that, which would be an easy thing to do.
+
+32
+00:03:10,940 --> 00:03:15,900
+ It's going to be a parade.
+
+33
+00:03:15,900 --> 00:03:21,700
+ It's pretty different, so all the last one, and this one, so I might just down the wheat
+
+34
+00:03:21,700 --> 00:03:24,320
+ what I've done in a couple of years.
+
+35
+00:03:24,320 --> 00:03:28,480
+ Keep it in there, what topic was there from that, sorry?
+
+36
+00:03:28,480 --> 00:03:33,080
+ Like, you can have the numbers 1, 2, 3, 4, up to 9.
+
+37
+00:03:33,080 --> 00:03:35,360
+ That's what the only issue I have with on the fly,
+
+38
+00:03:35,360 --> 00:03:37,220
+ whether it's personal.
+
+39
+00:03:37,220 --> 00:03:41,120
+ Right, not a seeker.
+
+40
+00:03:41,120 --> 00:03:45,360
+ Keep it in the working simple, so it's robust.
+
+41
+00:03:45,360 --> 00:03:49,560
+ No topics specified, I have a default, yeah.
+
+42
+00:03:49,560 --> 00:03:52,560
+ But only I'll need to have done all this stuff to you that.
+
+43
+00:03:55,660 --> 00:03:57,260
+ Purely a formality.
+
+44
+00:04:00,860 --> 00:04:02,860
+ We could put it in a packet.
+
+45
+00:04:03,660 --> 00:04:04,160
+ Yeah.
+
+46
+00:04:05,260 --> 00:04:06,160
+ Because he...
+
+47
+00:04:10,060 --> 00:04:11,660
+ And of course, the circuit board.
+
+48
+00:04:12,160 --> 00:04:14,060
+ No, it's not very handy, I think.
+
+49
+00:04:14,960 --> 00:04:16,360
+ Do we have too many functions?
+
+50
+00:04:17,860 --> 00:04:20,500
+ It's going to be a little difficult, more difficult.
+
+51
+00:04:20,500 --> 00:04:22,220
+ Yeah, sure.
+
+52
+00:04:23,340 --> 00:04:25,540
+ That's essentially the same as the ones.
+
+53
+00:04:26,180 --> 00:04:28,900
+ Well, yeah, that's always going to be the kind of search.
+
+54
+00:04:28,900 --> 00:04:30,900
+ So, I just ignore that a little bit.
+
+55
+00:04:31,780 --> 00:04:33,780
+ Well, that's in on 18th.
+
+56
+00:04:34,580 --> 00:04:37,380
+ How can you get range of people if you have three?
+
+57
+00:04:37,380 --> 00:04:39,380
+ And you would? Yeah.
+
+58
+00:04:40,260 --> 00:04:43,060
+ One is a good choice, but it's like that.
+
+59
+00:04:43,060 --> 00:04:45,860
+ They're not really very interested in features.
+
+60
+00:04:45,860 --> 00:04:53,540
+ this week's only two days old. Browsing sort of thing. It's just, it tells you who participated.
+
+61
+00:04:57,140 --> 00:05:01,220
+ And you're front scene, right? About to show requirements.
+
+62
+00:05:05,860 --> 00:05:09,700
+ Yeah, yeah, yeah, that's going to be no work, too.
+
+63
+00:05:11,220 --> 00:05:18,100
+ Yeah, so then just next it's pretty crude anyway. It's just looking for like instead of the
+
+64
+00:05:27,780 --> 00:05:32,020
+ I'm supposed to make a little presentation on it, but that's after it's financing
+
+65
+00:05:33,540 --> 00:05:36,660
+ My remote control tends to fall a lot. Okay
+
+66
+00:05:39,540 --> 00:05:40,380
+ - Yeah, Chad.
+
+67
+00:05:42,100 --> 00:05:44,860
+ - We could put it on the right click.
+
+68
+00:05:44,860 --> 00:05:47,720
+ - Was there anything else we wanted to add to the timeline?
+
+69
+00:05:47,720 --> 00:05:48,560
+ Oh, really?
+
+70
+00:05:50,560 --> 00:05:52,120
+ Yeah, it's one of the easiest things.
+
+71
+00:05:53,300 --> 00:05:56,020
+ - Yeah, the age gap.
+
+72
+00:05:56,020 --> 00:05:58,180
+ So, can you go to the next slide please?
+
+73
+00:06:01,620 --> 00:06:03,420
+ - But I think you can, yeah.
+
+74
+00:06:04,420 --> 00:06:07,280
+ I don't think Java knows how to do that really.
+
+75
+00:06:07,280 --> 00:06:09,300
+ - Wait, no, I think it's just a topic one.
+
+76
+00:06:09,540 --> 00:06:11,940
+ And there won't supposed to be a woman. It must be a
+
+77
+00:06:15,220 --> 00:06:17,220
+ Yeah, it was
+
+78
+00:06:26,660 --> 00:06:28,660
+ That's the price
+
+79
+00:06:34,340 --> 00:06:36,340
+ There's a bluff of text
+
+80
+00:06:36,340 --> 00:06:42,340
+ Goals or something. Okay. Yeah. Yeah. Okay.
+
+81
+00:06:44,340 --> 00:06:46,340
+ Okay. Yeah.
+
+82
+00:06:50,340 --> 00:06:52,340
+ Yeah.
+
+83
+00:06:54,340 --> 00:06:58,340
+ I think no. Yeah.
+
+84
+00:07:00,340 --> 00:07:04,340
+ What about... I hate this kind of thing.
+
+85
+00:07:04,340 --> 00:07:07,280
+ That's the screen we're going to play.
+
+86
+00:07:07,280 --> 00:07:09,020
+ OK.
+
+87
+00:07:09,020 --> 00:07:09,920
+ Respect.
+
+88
+00:07:09,920 --> 00:07:10,940
+ Respect.
+
+89
+00:07:10,940 --> 00:07:12,860
+ To keep the remote.
+
+90
+00:07:12,860 --> 00:07:14,780
+ There we go.
+
+91
+00:07:14,780 --> 00:07:16,700
+ You don't know me.
+
+92
+00:07:16,700 --> 00:07:21,260
+ And I'll give it a three.
+
+93
+00:07:21,260 --> 00:07:22,220
+ Then--
+
+94
+00:07:22,220 --> 00:07:24,220
+ OK, yeah.
+
+95
+00:07:24,220 --> 00:07:26,300
+ We don't think so as well.
+
+96
+00:07:26,300 --> 00:07:28,140
+ Yeah, with the help of it.
+
+97
+00:07:28,140 --> 00:07:29,140
+ Yes.
+
+98
+00:07:29,140 --> 00:07:30,140
+ [INAUDIBLE]
+
+99
+00:07:30,140 --> 00:07:31,180
+ It's week six next week.
+
+100
+00:07:34,340 --> 00:07:37,340
+ That's a good idea.
+
+101
+00:07:37,340 --> 00:07:39,340
+ Yeah, I should have left.
+
+102
+00:07:39,340 --> 00:07:41,340
+ Yeah.
+
+103
+00:07:41,340 --> 00:07:42,340
+ Okay.
+
+104
+00:07:42,340 --> 00:07:43,340
+ Nice.
+
+105
+00:07:43,340 --> 00:07:45,340
+ Yeah.
+
+106
+00:07:45,340 --> 00:07:47,340
+ Something quite amazing actually.
+
+107
+00:07:47,340 --> 00:07:48,340
+ Yeah.
+
+108
+00:07:48,340 --> 00:07:49,340
+ Yeah.
+
+109
+00:07:49,340 --> 00:07:52,340
+ Exactly.
+
+110
+00:07:52,340 --> 00:07:54,340
+ Single code.
+
+111
+00:07:54,340 --> 00:07:58,340
+ I don't understand.
+
+112
+00:07:58,340 --> 00:08:00,340
+ Thank you.
+
+113
+00:08:00,340 --> 00:08:22,340
+ I'll go away, that's right, this was um, that's a good point. No, that's not going to work.
+
+114
+00:08:22,340 --> 00:08:26,340
+ Hmm, I can sit down, I think.
+
+115
+00:08:26,340 --> 00:08:28,340
+ I think so.
+
+116
+00:08:28,340 --> 00:08:30,340
+ I'm sure you could do anything.
+
+117
+00:08:30,340 --> 00:08:32,340
+ Should we turn these up?
+
+118
+00:08:32,340 --> 00:08:34,340
+ No.
+
+119
+00:08:34,340 --> 00:08:37,340
+ It's just good.
+
+120
+00:08:37,340 --> 00:08:39,340
+ Well, it's not that many users.
+
+121
+00:08:39,340 --> 00:08:41,340
+ If you want to change my code.
+
+122
+00:08:41,340 --> 00:08:43,340
+ No, okay.
+
+123
+00:08:43,340 --> 00:08:45,340
+ 15.
+
+124
+00:08:45,340 --> 00:08:47,340
+ Yeah.
+
+125
+00:08:47,340 --> 00:08:49,340
+ Yeah.
+
+126
+00:08:49,340 --> 00:08:51,340
+ What?
+
+127
+00:08:51,340 --> 00:08:53,340
+ I think you can pull it off now.
+
+128
+00:08:53,340 --> 00:08:54,340
+ Um...
+
+129
+00:08:55,340 --> 00:08:56,340
+ It's okay.
+
+130
+00:08:59,340 --> 00:09:00,340
+ Which means...
+
+131
+00:09:00,340 --> 00:09:02,340
+ Okay, right.
+
+132
+00:09:02,340 --> 00:09:03,340
+ Crocodile?
+
+133
+00:09:07,340 --> 00:09:08,340
+ Yeah.
+
+134
+00:09:10,340 --> 00:09:11,340
+ It looks...
+
+135
+00:09:11,340 --> 00:09:13,340
+ Too close, yeah.
+
+136
+00:09:13,340 --> 00:09:14,340
+ Too point.
+
+137
+00:09:14,340 --> 00:09:15,340
+ Or blue.
+
+138
+00:09:15,340 --> 00:09:17,340
+ Push button.
+
+139
+00:09:17,340 --> 00:09:18,340
+ Um...
+
+140
+00:09:18,340 --> 00:09:24,520
+ Yeah, and your name is um, no, no
+
+141
+00:09:36,240 --> 00:09:43,520
+ Yeah, no, that's true. Yeah, yeah, I think
+
+142
+00:09:48,340 --> 00:10:03,780
+ Four whatever cool cool. I mean yeah
+
+143
+00:10:18,340 --> 00:10:33,780
+ Both. Nice. Okay, I read. So you could. Can you make okay? Yeah, it's robber. Yeah.
+
+144
+00:10:35,860 --> 00:10:45,700
+ I think yeah. The first. Yeah. Yeah. I know. Okay.
+
+145
+00:10:46,660 --> 00:11:05,540
+ Birds. Quick ID. Yeah. Um, maybe. Yeah. Yeah. No. Okay. Right. That's the. All right. But yeah.
+
+146
+00:11:08,180 --> 00:11:13,940
+ Okay. Yeah. Numbers. Do they? Yeah.
+
+147
+00:11:16,260 --> 00:11:17,360
+ - No.
+
+148
+00:11:17,360 --> 00:11:18,560
+ - Yep.
+
+149
+00:11:18,560 --> 00:11:19,560
+ - Oops.
+
+150
+00:11:19,560 --> 00:11:20,700
+ - Yeah.
+
+151
+00:11:20,700 --> 00:11:21,540
+ - No.
+
+152
+00:11:22,800 --> 00:11:23,800
+ - One.
+
+153
+00:11:23,800 --> 00:11:24,940
+ - Yeah.
+
+154
+00:11:24,940 --> 00:11:25,960
+ - Oops.
+
+155
+00:11:25,960 --> 00:11:27,040
+ - Mm-hmm.
+
+156
+00:11:27,040 --> 00:11:28,200
+ - Yeah.
+
+157
+00:11:28,200 --> 00:11:29,200
+ - Yeah.
+
+158
+00:11:29,200 --> 00:11:30,200
+ - Mm-hmm.
+
+159
+00:11:30,200 --> 00:11:31,280
+ - Yeah.
+
+160
+00:11:31,280 --> 00:11:32,440
+ - Mm-hmm.
+
+161
+00:11:32,440 --> 00:11:33,440
+ - Yeah.
+
+162
+00:11:33,440 --> 00:11:34,440
+ - Mm-hmm.
+
+163
+00:11:34,440 --> 00:11:35,600
+ - Mm-hmm.
+
+164
+00:11:35,600 --> 00:11:36,700
+ - Mm-hmm.
+
+165
+00:11:36,700 --> 00:11:37,700
+ - But.
+
+166
+00:11:37,700 --> 00:11:38,840
+ - Mm-hmm.
+
+167
+00:11:38,840 --> 00:11:39,840
+ - Mm-hmm.
+
+168
+00:11:39,840 --> 00:11:40,940
+ - Okay.
+
+169
+00:11:40,940 --> 00:11:42,040
+ - Yes.
+
+170
+00:11:42,040 --> 00:11:43,040
+ - By me?
+
+171
+00:11:43,040 --> 00:11:44,140
+ - Mm-hmm.
+
+172
+00:11:44,140 --> 00:11:45,240
+ - Mm-hmm.
+
+173
+00:11:45,240 --> 00:11:46,240
+ - Yeah?
+
+174
+00:11:46,240 --> 00:12:16,240
+ Yeah, okay. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. All right. Yeah. Yeah. Okay. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah. Yeah.
+
+175
+00:12:16,240 --> 00:12:39,240
+ yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah?
+
+176
+00:12:46,240 --> 00:13:03,740
+ Yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah, yeah.
+
