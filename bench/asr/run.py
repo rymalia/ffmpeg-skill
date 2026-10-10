@@ -98,14 +98,18 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--configs", help="comma-separated config names (default: every entry of CONFIGS)")
     args = ap.parse_args()
-    wanted = args.configs.split(",") if args.configs else list(CONFIGS)
+    if args.configs is None:
+        wanted = list(CONFIGS)
+    else:  # trimmed, empty entries dropped, first occurrence kept: a duplicate would double its samples
+        wanted = list(dict.fromkeys(n.strip() for n in args.configs.split(",") if n.strip()))
+        if not wanted:
+            ap.error("--configs is empty")
     unknown = [n for n in wanted if n not in ALL_CONFIGS]
     if unknown:
         ap.error(f"unknown config(s) {', '.join(unknown)}; choose from {', '.join(ALL_CONFIGS)}")
     for var in SCRUB:
         os.environ.pop(var, None)
     out = HERE / "results" / args.label
-    out.mkdir(parents=True, exist_ok=True)
     info = machine()
     configs = []
     for name in wanted:
@@ -115,6 +119,9 @@ def main() -> None:
             configs.append(name)
         else:
             print(f"skipping {name}: {detail}", file=sys.stderr)
+    if not configs:
+        sys.exit("no requested config is available; nothing to run (see the skipping lines above)")
+    out.mkdir(parents=True, exist_ok=True)
     (out / "machine.json").write_text(json.dumps(info, indent=1) + "\n")
     data = HERE / "data"
     timings = (out / "timings.jsonl").open("a")
