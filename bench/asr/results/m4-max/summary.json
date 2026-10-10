@@ -1,0 +1,670 @@
+{
+ "label": "m4-max",
+ "machine": {
+  "chip": "Apple M4 Max",
+  "memory_gb": 128,
+  "macos": "27.0",
+  "power": "Now drawing from 'AC Power'",
+  "python": "3.9.6",
+  "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "whisper_cpp": "whisper.cpp 1.9.5",
+  "parakeet_mlx": "parakeet-mlx v0.5.2",
+  "skill_commit": "35bba62",
+  "configs": {
+   "whisper.cpp-base": {
+    "available": true,
+    "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-base.bin"
+   },
+   "whisper.cpp-small": {
+    "available": true,
+    "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-small.bin"
+   },
+   "whisper.cpp-large-v3-turbo": {
+    "available": true,
+    "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-large-v3-turbo.bin"
+   },
+   "parakeet-mlx-v2": {
+    "available": true,
+    "detail": "parakeet-mlx=/Users/rymalia/.local/bin/parakeet-mlx"
+   },
+   "parakeet.cpp-v2": {
+    "available": true,
+    "detail": "parakeet-cli=/Users/rymalia/.local/bin/parakeet-cli, gguf=[PosixPath('/Users/rymalia/.cache/parakeet.cpp/tdt-0.6b-v2-f16.gguf')]"
+   }
+  }
+ },
+ "cells": [
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-base",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 6.59,
+   "sub": 84,
+   "dele": 11,
+   "ins": 12,
+   "ref_words": 1623,
+   "median_s": 6.69,
+   "rtfx": 89.4,
+   "spread_s": [
+    6.69,
+    6.52,
+    8.92
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-small",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 3.45,
+   "sub": 45,
+   "dele": 8,
+   "ins": 3,
+   "ref_words": 1623,
+   "median_s": 12.66,
+   "rtfx": 47.2,
+   "spread_s": [
+    12.66,
+    11.78,
+    19.96
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 2.53,
+   "sub": 28,
+   "dele": 5,
+   "ins": 8,
+   "ref_words": 1623,
+   "median_s": 15.79,
+   "rtfx": 37.9,
+   "spread_s": [
+    15.79,
+    15.6,
+    26.27
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "librispeech",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 2.96,
+   "sub": 31,
+   "dele": 6,
+   "ins": 11,
+   "ref_words": 1623,
+   "median_s": 5.22,
+   "rtfx": 114.5,
+   "spread_s": [
+    5.22,
+    5.19,
+    6.94
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "librispeech",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 2.03,
+   "sub": 21,
+   "dele": 9,
+   "ins": 3,
+   "ref_words": 1623,
+   "median_s": 4.14,
+   "rtfx": 144.4,
+   "spread_s": [
+    4.14,
+    4.08,
+    6.16
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-base",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 38.05,
+   "sub": 156,
+   "dele": 361,
+   "ins": 23,
+   "ref_words": 1419,
+   "median_s": 4.83,
+   "rtfx": 102.9,
+   "spread_s": [
+    4.86,
+    4.83,
+    4.56
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-small",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 47.92,
+   "sub": 74,
+   "dele": 595,
+   "ins": 11,
+   "ref_words": 1419,
+   "median_s": 7.02,
+   "rtfx": 70.8,
+   "spread_s": [
+    7.02,
+    7.16,
+    6.88
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 25.72,
+   "sub": 156,
+   "dele": 145,
+   "ins": 64,
+   "ref_words": 1419,
+   "median_s": 17.73,
+   "rtfx": 28.0,
+   "spread_s": [
+    17.85,
+    17.73,
+    17.5
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 20.86,
+   "sub": 94,
+   "dele": 176,
+   "ins": 26,
+   "ref_words": 1419,
+   "median_s": 5.74,
+   "rtfx": 86.6,
+   "spread_s": [
+    5.74,
+    5.74,
+    5.79
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "ami",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 24.45,
+   "sub": 89,
+   "dele": 228,
+   "ins": 30,
+   "ref_words": 1419,
+   "median_s": 4.18,
+   "rtfx": 118.8,
+   "spread_s": [
+    4.23,
+    4.18,
+    4.1
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-base",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 22.84,
+   "sub": 172,
+   "dele": 90,
+   "ins": 126,
+   "ref_words": 1699,
+   "median_s": 8.35,
+   "rtfx": 71.1,
+   "spread_s": [
+    8.35,
+    8.31,
+    8.37
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-small",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 16.36,
+   "sub": 98,
+   "dele": 104,
+   "ins": 76,
+   "ref_words": 1699,
+   "median_s": 13.04,
+   "rtfx": 45.5,
+   "spread_s": [
+    13.05,
+    12.93,
+    13.04
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 188.76,
+   "sub": 812,
+   "dele": 39,
+   "ins": 2356,
+   "ref_words": 1699,
+   "median_s": 24.41,
+   "rtfx": 24.3,
+   "spread_s": [
+    24.41,
+    24.71,
+    24.36
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 19.84,
+   "sub": 87,
+   "dele": 176,
+   "ins": 74,
+   "ref_words": 1699,
+   "median_s": 5.54,
+   "rtfx": 107.0,
+   "spread_s": [
+    5.46,
+    5.54,
+    5.7
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "earnings22",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 23.96,
+   "sub": 90,
+   "dele": 282,
+   "ins": 35,
+   "ref_words": 1699,
+   "median_s": 4.2,
+   "rtfx": 141.2,
+   "spread_s": [
+    4.17,
+    4.25,
+    4.2
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-base",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 15.96,
+   "sub": 167,
+   "dele": 73,
+   "ins": 63,
+   "ref_words": 1899,
+   "median_s": 7.52,
+   "rtfx": 79.5,
+   "spread_s": [
+    7.37,
+    17.74,
+    7.52
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-small",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 14.43,
+   "sub": 134,
+   "dele": 88,
+   "ins": 52,
+   "ref_words": 1899,
+   "median_s": 11.96,
+   "rtfx": 49.9,
+   "spread_s": [
+    11.85,
+    18.53,
+    11.96
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 13.16,
+   "sub": 120,
+   "dele": 73,
+   "ins": 57,
+   "ref_words": 1899,
+   "median_s": 16.98,
+   "rtfx": 35.2,
+   "spread_s": [
+    16.59,
+    29.28,
+    16.98
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 16.43,
+   "sub": 132,
+   "dele": 126,
+   "ins": 54,
+   "ref_words": 1899,
+   "median_s": 5.66,
+   "rtfx": 105.5,
+   "spread_s": [
+    5.6,
+    7.39,
+    5.66
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 14.38,
+   "sub": 116,
+   "dele": 113,
+   "ins": 44,
+   "ref_words": 1899,
+   "median_s": 4.4,
+   "rtfx": 135.8,
+   "spread_s": [
+    4.4,
+    6.35,
+    4.4
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-base",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 10.39,
+   "sub": 67,
+   "dele": 72,
+   "ins": 21,
+   "ref_words": 1540,
+   "median_s": 5.62,
+   "rtfx": 108.3,
+   "spread_s": [
+    5.56,
+    7.93,
+    5.62
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-small",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 7.47,
+   "sub": 62,
+   "dele": 25,
+   "ins": 28,
+   "ref_words": 1540,
+   "median_s": 10.48,
+   "rtfx": 58.0,
+   "spread_s": [
+    10.4,
+    15.37,
+    10.48
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 8.38,
+   "sub": 49,
+   "dele": 57,
+   "ins": 23,
+   "ref_words": 1540,
+   "median_s": 14.39,
+   "rtfx": 42.3,
+   "spread_s": [
+    13.91,
+    29.59,
+    14.39
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 9.29,
+   "sub": 63,
+   "dele": 46,
+   "ins": 34,
+   "ref_words": 1540,
+   "median_s": 5.2,
+   "rtfx": 117.1,
+   "spread_s": [
+    5.07,
+    6.79,
+    5.2
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 6.43,
+   "sub": 45,
+   "dele": 32,
+   "ins": 22,
+   "ref_words": 1540,
+   "median_s": 4.12,
+   "rtfx": 147.6,
+   "spread_s": [
+    4.02,
+    5.86,
+    4.12
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-base",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 32.29,
+   "sub": 141,
+   "dele": 144,
+   "ins": 45,
+   "ref_words": 1022,
+   "median_s": 4.72,
+   "rtfx": 127.0,
+   "spread_s": [
+    4.63,
+    5.51,
+    4.72
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-small",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 16.44,
+   "sub": 106,
+   "dele": 47,
+   "ins": 15,
+   "ref_words": 1022,
+   "median_s": 8.68,
+   "rtfx": 69.1,
+   "spread_s": [
+    8.61,
+    13.0,
+    8.68
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "whisper.cpp-large-v3-turbo",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 231.7,
+   "sub": 637,
+   "dele": 2,
+   "ins": 1729,
+   "ref_words": 1022,
+   "median_s": 19.54,
+   "rtfx": 30.7,
+   "spread_s": [
+    18.75,
+    30.16,
+    19.54
+   ],
+   "engine_ran": "whisper.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "parakeet-mlx-v2",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 21.43,
+   "sub": 73,
+   "dele": 137,
+   "ins": 9,
+   "ref_words": 1022,
+   "median_s": 4.83,
+   "rtfx": 124.0,
+   "spread_s": [
+    4.83,
+    6.35,
+    4.83
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "common_voice",
+   "config": "parakeet.cpp-v2",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 14.87,
+   "sub": 64,
+   "dele": 78,
+   "ins": 10,
+   "ref_words": 1022,
+   "median_s": 3.75,
+   "rtfx": 159.9,
+   "spread_s": [
+    3.71,
+    5.98,
+    3.75
+   ],
+   "engine_ran": "parakeet.cpp"
+  }
+ ],
+ "overall": {
+  "whisper.cpp-base": {
+   "wer": 19.87,
+   "audio_s": 3493.4,
+   "time_s": 37.7,
+   "rtfx": 92.6
+  },
+  "whisper.cpp-small": {
+   "wer": 17.07,
+   "audio_s": 3493.4,
+   "time_s": 63.8,
+   "rtfx": 54.7
+  },
+  "whisper.cpp-large-v3-turbo": {
+   "wer": 69.12,
+   "audio_s": 3493.4,
+   "time_s": 108.8,
+   "rtfx": 32.1
+  },
+  "parakeet-mlx-v2": {
+   "wer": 14.73,
+   "audio_s": 3493.4,
+   "time_s": 32.2,
+   "rtfx": 108.5
+  },
+  "parakeet.cpp-v2": {
+   "wer": 14.25,
+   "audio_s": 3493.4,
+   "time_s": 24.8,
+   "rtfx": 140.9
+  }
+ }
+}

@@ -1,0 +1,33 @@
+{
+ "chip": "Apple M4 Max",
+ "memory_gb": 128,
+ "macos": "27.0",
+ "power": "Now drawing from 'AC Power'",
+ "python": "3.9.6",
+ "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+ "whisper_cpp": "whisper.cpp 1.9.5",
+ "parakeet_mlx": "parakeet-mlx v0.5.2",
+ "skill_commit": "35bba62",
+ "configs": {
+  "whisper.cpp-base": {
+   "available": true,
+   "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-base.bin"
+  },
+  "whisper.cpp-small": {
+   "available": true,
+   "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-small.bin"
+  },
+  "whisper.cpp-large-v3-turbo": {
+   "available": true,
+   "detail": "whisper-cli=/opt/homebrew/bin/whisper-cli, model=/Users/rymalia/.cache/whisper.cpp/ggml-large-v3-turbo.bin"
+  },
+  "parakeet-mlx-v2": {
+   "available": true,
+   "detail": "parakeet-mlx=/Users/rymalia/.local/bin/parakeet-mlx"
+  },
+  "parakeet.cpp-v2": {
+   "available": true,
+   "detail": "parakeet-cli=/Users/rymalia/.local/bin/parakeet-cli, gguf=[PosixPath('/Users/rymalia/.cache/parakeet.cpp/tdt-0.6b-v2-f16.gguf')]"
+  }
+ }
+}
