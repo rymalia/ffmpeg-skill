@@ -47,6 +47,11 @@ python3 bench/asr/run.py --label <machine>  # 1 warm-up + 3 timed passes; run on
 uv run bench/asr/score.py <machine> [<other machine> ...]   # report.md + summary.json per label
 ```
 
+Extra configs (`EXTRA_CONFIGS` in `run.py`, such as the Parakeet v3 models) run only when named with
+`--configs`, under a label of their own, for example
+`python3 bench/asr/run.py --label <machine>-extra --configs parakeet-mlx-v3,parakeet.cpp-v3`. A plain run is
+always the five configs in `CONFIGS`, so the machines stay comparable.
+
 `pick_clips.py` only needs re-running to change the selection. It rewrites `manifest.json`.
 
 ## How it's measured

@@ -6,6 +6,10 @@ so each number is what a user of this checkout gets (audio extraction, model loa
 engine's own long-form handling included).
 
   python3 bench/asr/run.py --label m3-air [--runs 3]
+  python3 bench/asr/run.py --label m4-max-extra --configs parakeet-mlx-v3,parakeet.cpp-v3
+
+--configs picks configs from CONFIGS and EXTRA_CONFIGS; without it the run is exactly CONFIGS, in
+order, so machines stay comparable. Extra configs belong under their own label.
 
 Order: one untimed warm-up pass over every (set, config), then --runs timed passes. Every
 pass walks the sets in turn and rotates the config order, so no engine always runs on a
@@ -35,18 +39,26 @@ CONFIGS = {
     "parakeet-mlx-v2": ("parakeet-mlx", "mlx-community/parakeet-tdt-0.6b-v2"),
     "parakeet.cpp-v2": ("parakeet.cpp", "base"),  # base is not a .gguf: the skill finds tdt-0.6b-v2-*.gguf
 }
+# Opt-in only (--configs): not part of the comparable run. A .gguf model is a path the skill loads as is.
+EXTRA_CONFIGS = {
+    "parakeet-mlx-v3": ("parakeet-mlx", "mlx-community/parakeet-tdt-0.6b-v3"),
+    "parakeet.cpp-v3": ("parakeet.cpp", os.path.expanduser("~/.cache/parakeet.cpp/tdt-0.6b-v3-f16.gguf")),
+}
+ALL_CONFIGS = {**CONFIGS, **EXTRA_CONFIGS}
 SETS = ("librispeech", "ami", "earnings22", "gigaspeech", "voxpopuli", "common_voice")
 SCRUB = ("FFMPEG_SKILL_ASR_ENGINE", "PARAKEET_MODEL", "PARAKEET_CPP_MODEL", "FFMPEG_SKILL_HW")
 
 
 def available(name: str) -> "tuple[bool, str]":
-    engine, model = CONFIGS[name]
+    engine, model = ALL_CONFIGS[name]
     if engine == "whisper.cpp":
         cli = shutil.which("whisper-cli") or shutil.which("whisper-cpp")
         path = os.path.expanduser(f"~/.cache/whisper.cpp/ggml-{model}.bin")
         return (bool(cli) and os.path.exists(path), f"whisper-cli={cli}, model={path}")
     if engine == "parakeet-mlx":
         return (bool(shutil.which("parakeet-mlx")), f"parakeet-mlx={shutil.which('parakeet-mlx')}")
+    if model.endswith(".gguf"):
+        return (bool(shutil.which("parakeet-cli")) and os.path.isfile(model), f"parakeet-cli={shutil.which('parakeet-cli')}, gguf={model}")
     gguf = sorted(Path(os.path.expanduser("~/.cache/parakeet.cpp")).glob("tdt-0.6b-v2-*.gguf"))
     return (bool(shutil.which("parakeet-cli")) and bool(gguf), f"parakeet-cli={shutil.which('parakeet-cli')}, gguf={gguf[:1]}")
 
@@ -76,14 +88,19 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", required=True, help="machine label, e.g. m3-air or m4-max")
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--configs", help="comma-separated config names (default: every entry of CONFIGS)")
     args = ap.parse_args()
+    wanted = args.configs.split(",") if args.configs else list(CONFIGS)
+    unknown = [n for n in wanted if n not in ALL_CONFIGS]
+    if unknown:
+        ap.error(f"unknown config(s) {', '.join(unknown)}; choose from {', '.join(ALL_CONFIGS)}")
     for var in SCRUB:
         os.environ.pop(var, None)
     out = HERE / "results" / args.label
     out.mkdir(parents=True, exist_ok=True)
     info = machine()
     configs = []
-    for name in CONFIGS:
+    for name in wanted:
         ok, detail = available(name)
         info.setdefault("configs", {})[name] = {"available": ok, "detail": detail}
         if ok:
@@ -101,7 +118,7 @@ def main() -> None:
             wav = data / f"{set_name}.wav"
             k = (rep + s_i) % len(configs)
             for name in configs[k:] + configs[:k]:
-                engine, model = CONFIGS[name]
+                engine, model = ALL_CONFIGS[name]
                 srt = out / set_name / f"{name}.srt"
                 srt.parent.mkdir(exist_ok=True)
                 target = srt if rep == 1 else out / set_name / f".{name}.scratch.srt"
