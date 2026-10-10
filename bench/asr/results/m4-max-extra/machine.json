@@ -1,0 +1,21 @@
+{
+ "chip": "Apple M4 Max",
+ "memory_gb": 128,
+ "macos": "27.0",
+ "power": "Now drawing from 'AC Power'",
+ "python": "3.9.6",
+ "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+ "whisper_cpp": "whisper.cpp 1.9.5",
+ "parakeet_mlx": "parakeet-mlx v0.5.2",
+ "skill_commit": "7072293",
+ "configs": {
+  "parakeet-mlx-v3": {
+   "available": true,
+   "detail": "parakeet-mlx=/Users/rymalia/.local/bin/parakeet-mlx"
+  },
+  "parakeet.cpp-v3": {
+   "available": true,
+   "detail": "parakeet-cli=/Users/rymalia/.local/bin/parakeet-cli, gguf=/Users/rymalia/.cache/parakeet.cpp/tdt-0.6b-v3-f16.gguf"
+  }
+ }
+}

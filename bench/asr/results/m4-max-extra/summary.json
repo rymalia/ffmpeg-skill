@@ -1,0 +1,280 @@
+{
+ "label": "m4-max-extra",
+ "machine": {
+  "chip": "Apple M4 Max",
+  "memory_gb": 128,
+  "macos": "27.0",
+  "power": "Now drawing from 'AC Power'",
+  "python": "3.9.6",
+  "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "whisper_cpp": "whisper.cpp 1.9.5",
+  "parakeet_mlx": "parakeet-mlx v0.5.2",
+  "skill_commit": "7072293",
+  "configs": {
+   "parakeet-mlx-v3": {
+    "available": true,
+    "detail": "parakeet-mlx=/Users/rymalia/.local/bin/parakeet-mlx"
+   },
+   "parakeet.cpp-v3": {
+    "available": true,
+    "detail": "parakeet-cli=/Users/rymalia/.local/bin/parakeet-cli, gguf=/Users/rymalia/.cache/parakeet.cpp/tdt-0.6b-v3-f16.gguf"
+   }
+  }
+ },
+ "cells": [
+  {
+   "set": "librispeech",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 4.56,
+   "sub": 30,
+   "dele": 34,
+   "ins": 10,
+   "ref_words": 1623,
+   "median_s": 5.54,
+   "rtfx": 107.9,
+   "spread_s": [
+    5.53,
+    5.54,
+    5.54
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "librispeech",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 597.9,
+   "runs": 3,
+   "errors": [],
+   "wer": 21.13,
+   "sub": 16,
+   "dele": 324,
+   "ins": 3,
+   "ref_words": 1623,
+   "median_s": 4.14,
+   "rtfx": 144.2,
+   "spread_s": [
+    4.14,
+    4.28,
+    4.11
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "ami",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 23.82,
+   "sub": 114,
+   "dele": 198,
+   "ins": 26,
+   "ref_words": 1419,
+   "median_s": 6.51,
+   "rtfx": 76.3,
+   "spread_s": [
+    6.54,
+    6.5,
+    6.51
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "ami",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 497.0,
+   "runs": 3,
+   "errors": [],
+   "wer": 24.95,
+   "sub": 93,
+   "dele": 206,
+   "ins": 55,
+   "ref_words": 1419,
+   "median_s": 4.72,
+   "rtfx": 105.3,
+   "spread_s": [
+    4.72,
+    4.84,
+    4.68
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "earnings22",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 21.31,
+   "sub": 90,
+   "dele": 186,
+   "ins": 86,
+   "ref_words": 1699,
+   "median_s": 6.51,
+   "rtfx": 91.1,
+   "spread_s": [
+    6.53,
+    6.51,
+    6.5
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "earnings22",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 593.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 30.25,
+   "sub": 93,
+   "dele": 355,
+   "ins": 66,
+   "ref_words": 1699,
+   "median_s": 4.58,
+   "rtfx": 129.7,
+   "spread_s": [
+    4.62,
+    4.5,
+    4.58
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 34.07,
+   "sub": 117,
+   "dele": 491,
+   "ins": 39,
+   "ref_words": 1899,
+   "median_s": 5.85,
+   "rtfx": 102.1,
+   "spread_s": [
+    5.84,
+    5.85,
+    5.88
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "gigaspeech",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 597.4,
+   "runs": 3,
+   "errors": [],
+   "wer": 31.28,
+   "sub": 106,
+   "dele": 447,
+   "ins": 41,
+   "ref_words": 1899,
+   "median_s": 4.41,
+   "rtfx": 135.4,
+   "spread_s": [
+    4.46,
+    4.41,
+    4.32
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 41.56,
+   "sub": 49,
+   "dele": 572,
+   "ins": 19,
+   "ref_words": 1540,
+   "median_s": 5.12,
+   "rtfx": 118.9,
+   "spread_s": [
+    5.13,
+    5.08,
+    5.12
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "voxpopuli",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 608.3,
+   "runs": 3,
+   "errors": [],
+   "wer": 57.34,
+   "sub": 16,
+   "dele": 862,
+   "ins": 5,
+   "ref_words": 1540,
+   "median_s": 3.52,
+   "rtfx": 172.7,
+   "spread_s": [
+    3.59,
+    3.52,
+    3.49
+   ],
+   "engine_ran": "parakeet.cpp"
+  },
+  {
+   "set": "common_voice",
+   "config": "parakeet-mlx-v3",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 46.28,
+   "sub": 62,
+   "dele": 399,
+   "ins": 12,
+   "ref_words": 1022,
+   "median_s": 5.05,
+   "rtfx": 118.6,
+   "spread_s": [
+    5.05,
+    5.06,
+    5.03
+   ],
+   "engine_ran": "parakeet-mlx"
+  },
+  {
+   "set": "common_voice",
+   "config": "parakeet.cpp-v3",
+   "audio_s": 599.5,
+   "runs": 3,
+   "errors": [],
+   "wer": 33.76,
+   "sub": 44,
+   "dele": 295,
+   "ins": 6,
+   "ref_words": 1022,
+   "median_s": 3.68,
+   "rtfx": 162.8,
+   "spread_s": [
+    3.7,
+    3.68,
+    3.62
+   ],
+   "engine_ran": "parakeet.cpp"
+  }
+ ],
+ "overall": {
+  "parakeet-mlx-v3": {
+   "wer": 27.54,
+   "audio_s": 3493.4,
+   "time_s": 34.6,
+   "rtfx": 101.0
+  },
+  "parakeet.cpp-v3": {
+   "wer": 32.96,
+   "audio_s": 3493.4,
+   "time_s": 25.1,
+   "rtfx": 139.4
+  }
+ }
+}
