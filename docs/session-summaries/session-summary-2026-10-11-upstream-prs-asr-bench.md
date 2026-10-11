@@ -1,9 +1,9 @@
 ---
 session_id: fe5d7932-18b8-411c-8606-a66c9a9f26de
 date: 2026-10-11
-time: "2026-10-09 06:05 PM PDT – 2026-10-11 01:13 PM PDT"
+time: "2026-10-09 06:05 PM PDT – 2026-10-11 01:44 PM PDT"
 project: ffmpeg-skill
-branch: m-series-hw-parakeet
+branch: notes
 related_pr: 319
 ---
 
@@ -17,7 +17,7 @@ This session ran over three days and caught up on the follow-ups owed to the ups
 - Issue #317 was filed, which the maintainer then implemented as PR #321. The session verified #321 on real hardware and reported back.
 - A Parakeet vs whisper.cpp benchmark ran on two Macs and was posted as issue #318. It found a whisper.cpp repetition loop that `-mc 0` stops.
 
-The session was compacted once, partway through 2026-10-09/10. This summary covers both halves.
+At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-hw-parakeet` branch was retired, with its working notes moved to a new `notes` branch. The session was compacted once, partway through 2026-10-09/10. This summary covers both halves.
 
 ## Key Decisions Made
 
@@ -31,6 +31,8 @@ The session was compacted once, partway through 2026-10-09/10. This summary cove
 | **Verify #321 with a real `brew unlink ffmpeg-full && brew link ffmpeg`, restored by `ensure-ffmpeg-full`** | The maintainer asked for the real setup. The symlink-shim simulation was done first but labelled separately in the reply. |
 | **Leave Codex's "Major" (ffmpeg and ffprobe resolve independently) out of the #321 reply** | It reproduces only with a contrived PATH. Both Homebrew formulas ship the pair, and that PATH could mix builds before the PR too. |
 | **Raise the `docs/contract.md:363` "no paths" contradiction in the #321 reply** | Confirmed: the new `ffmpeg_path` / `ffprobe_path` keys contradict a deliberate privacy promise in the contract doc. |
+| **Reinstall with `npx ffmpeg-skill@2.8.2 --codex`, not the default target** | `~/.claude/skills/ffmpeg-skill` is a symlink to `~/.agents/skills/ffmpeg-skill`. The installer renames its target aside and moves a new copy in, so the default (Claude Code) target would have replaced the symlink with a separate copy and left `~/.agents` at 2.3.1. `--codex` targets the real directory. |
+| **Retire `m-series-hw-parakeet` by moving its notes to a new `notes` branch** (user's choice) | Its code was the pre-takeover version of #311, #312 and #313, which upstream has since reworked. 26 files existed only on that branch: the docs, `ISSUES.md` and a prototype. `notes` starts from upstream 2.8.2, so the main checkout has current code, and future session summaries have a home. |
 | **Codex model is `gpt-5.6-luna` xhigh, run serially** | The user corrected terra to luna. Three terra xhigh runs in parallel had hit the usage limit. |
 
 ## Changes Made
@@ -42,6 +44,8 @@ The session was compacted once, partway through 2026-10-09/10. This summary cove
 | **Bench harness and results** | Fork branch `bench/asr-parakeet-vs-whisper` (worktree `ffmpeg-skill-wt-bench`). `bench/asr/{pick_clips,prep,run,score,mc0}.py`, plus results for `m4-max`, `m4-max-extra`, `m3-air` and `m3-air-mc0`. The M3 results and the `-mc 0` A/B are `7eae948`. The M4 agent added `1d72cb0` (stricter `--configs`). The local branch was fast-forwarded to match origin. |
 | **Upstream posts** | Comment on #311 (apology, `test_accel` 54 OK, the real 8K refusal). Issues #317 and #318, PR #319, and the verification comment on #321. |
 | **Memory and global config** | Rewrote `codex-model-choice`. Added and updated `upstream-maintainer-expectations`. Reinforced `suite-entry-point` (use a fresh `OUT` every run). Changed `~/.claude/CLAUDE.md` from `gpt-5.6-terra` to `gpt-5.6-luna`. |
+| **Skill reinstalled** | `~/.agents/skills/ffmpeg-skill` upgraded from 2.3.1 to 2.8.2 (`npx -y ffmpeg-skill@2.8.2 --codex`). The `~/.claude/skills/ffmpeg-skill` symlink is unchanged. The old copy is backed up in the session scratchpad. |
+| **Branch retired** | Annotated tag `archive/m-series-hw-parakeet` on the old tip (`869a223`). New branch `notes` (tracking unset) from `upstream/main` (`6cfa6c7`), with commit `3c28053` carrying the 26 branch-only files: 19 session summaries, 3 plans, 2 setup docs, `ISSUES.md` and `tests/prototypes/join_copy_p3.py`. The local `m-series-hw-parakeet` branch was deleted after checking that the tag contains its tip. The main checkout is now on `notes`. |
 | **Verification worktrees** | Added detached worktrees `ffmpeg-skill-wt-pr321` (`25a0ef5`) and `ffmpeg-skill-wt-main282` (`6cfa6c7`). |
 
 ## Testing / Research Performed
@@ -81,6 +85,15 @@ The session was compacted once, partway through 2026-10-09/10. This summary cove
   - **Controls:** ffmpeg-full linked, `opt/ffmpeg-full/bin` first on PATH, and a lean binary via a wrapper outside any Cellar all give `source: "path"`.
   - **Restore:** after `ensure-ffmpeg-full`, doctor is `ok` with `source: path`.
   - **Codex:** a code review (FIX: 1 Major, 4 Minor, each verified; only the doc contradiction was kept). The reply's fact-check came back FIX, and the second pass SHIP.
+- **Reinstall check:**
+  - Both paths report `"version": "2.8.2"` in `package.json`, and the symlink is intact.
+  - `diff -rq` of the installed `scripts/` against the v2.8.2 source shows no differences.
+  - The installed `doctor` reports ok: 69 capabilities available, 0 missing.
+- **Branch-retirement check:**
+  - The 26 files on `notes` are byte-identical to the archive tag (`git diff --cached --quiet`).
+  - `scripts/`, `tests/test_*.py`, `SKILL.md` and `README.md` are identical to `upstream/main`.
+  - The tag contains the deleted branch's tip.
+  - The first commit message said 22 summaries. A count showed 19, so the unpushed commit was amended.
 - **Maintainer research:**
   - Read all of kajisho5's comments on the user's PRs.
   - All 40 of their recent PRs carry claude.ai/code session links.
@@ -97,7 +110,8 @@ The session was compacted once, partway through 2026-10-09/10. This summary cove
 
 ## Current State
 
-- **Main checkout:** on `m-series-hw-parakeet` (`59b2c4e`). `CLAUDE.local.md` is untracked, as before this session. This summary is the session's only change in this checkout.
+- **Main checkout:** on `notes` (upstream 2.8.2 plus the notes commit, tracking unset). `CLAUDE.local.md` is untracked, as before. The local `m-series-hw-parakeet` branch is gone. It survives as the local tag `archive/m-series-hw-parakeet` and on the fork at `59b2c4e` (without today's summary commit `869a223`, which is only in the tag).
+- **Installed skill:** 2.8.2 at `~/.agents/skills/ffmpeg-skill`, reached through the `~/.claude/skills/ffmpeg-skill` symlink.
 - **Worktrees:**
   - `ffmpeg-skill-wt-bench` at `1d72cb0`, matching origin;
   - `ffmpeg-skill-wt-readme` at `f87345e` (#319, merged);
@@ -129,6 +143,11 @@ The session was compacted once, partway through 2026-10-09/10. This summary cove
 - **After #321 merges:**
   - remove the worktrees `ffmpeg-skill-wt-pr321`, `ffmpeg-skill-wt-main282` and `ffmpeg-skill-wt-readme`;
   - delete the fork branch `pr/macos-ffmpeg-full-link` if wanted.
-- **Reinstall the skill from the latest release.** An earlier check in this session found the installed copy at 2.3.1. The 2.8.2 in this session's doctor output came from running in the worktrees.
-- **Retire the `m-series-hw-parakeet` branch**, now that #311 and #312 have landed upstream.
+- **The user pushes:**
+  ```
+  git push -u origin notes
+  git push origin archive/m-series-hw-parakeet
+  ```
+  Then, once both are on the fork, delete the old remote branch with `git push origin --delete m-series-hw-parakeet`.
+- **Future session summaries go on `notes`.** To bring in new upstream code, `git merge upstream/main` there. It holds only docs, so merges are clean.
 - **Optional:** the `.m4v` `--help` doc gap noted earlier.
