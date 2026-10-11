@@ -1,7 +1,8 @@
 ---
 session_id: fe5d7932-18b8-411c-8606-a66c9a9f26de
 date: 2026-10-11
-time: "2026-10-09 06:05 PM PDT – 2026-10-11 01:44 PM PDT"
+time: "2026-10-09 06:05 PM PDT – 2026-10-11 02:54 PM PDT"
+resumed: "2026-10-11 02:43 PM PDT"
 project: ffmpeg-skill
 branch: notes
 related_pr: 319
@@ -17,7 +18,7 @@ This session ran over three days and caught up on the follow-ups owed to the ups
 - Issue #317 was filed, which the maintainer then implemented as PR #321. The session verified #321 on real hardware and reported back.
 - A Parakeet vs whisper.cpp benchmark ran on two Macs and was posted as issue #318. It found a whisper.cpp repetition loop that `-mc 0` stops.
 
-At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-hw-parakeet` branch was retired, with its working notes moved to a new `notes` branch. The session was compacted once, partway through 2026-10-09/10. This summary covers both halves.
+#321 was then merged and released as v2.8.3, and the maintainer fixed the doc point the reply raised. At the end, the installed skill was upgraded from 2.3.1 to 2.8.2 and then to 2.8.3. The `m-series-hw-parakeet` branch was retired, with its working notes moved to a new `notes` branch. The session was compacted once, partway through 2026-10-09/10. This summary covers both halves.
 
 ## Key Decisions Made
 
@@ -45,6 +46,9 @@ At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-
 | **Upstream posts** | Comment on #311 (apology, `test_accel` 54 OK, the real 8K refusal). Issues #317 and #318, PR #319, and the verification comment on #321. |
 | **Memory and global config** | Rewrote `codex-model-choice`. Added and updated `upstream-maintainer-expectations`. Reinforced `suite-entry-point` (use a fresh `OUT` every run). Changed `~/.claude/CLAUDE.md` from `gpt-5.6-terra` to `gpt-5.6-luna`. |
 | **Skill reinstalled** | `~/.agents/skills/ffmpeg-skill` upgraded from 2.3.1 to 2.8.2 (`npx -y ffmpeg-skill@2.8.2 --codex`). The `~/.claude/skills/ffmpeg-skill` symlink is unchanged. The old copy is backed up in the session scratchpad. |
+| **Skill reinstalled again, at 2.8.3** | After #321 shipped in v2.8.3: `npx -y ffmpeg-skill@2.8.3 --codex`, with the symlink unchanged. |
+| **Worktrees removed** | `ffmpeg-skill-wt-pr321`, `ffmpeg-skill-wt-main282` and `ffmpeg-skill-wt-readme`, each removed with plain `git worktree remove`, then `git worktree prune`. Each held only ignored build output (`tests/out/`, `demos/out/`, `.DS_Store`). The temporary ref `upstream/pr-321-head` was deleted. The `pr/macos-ffmpeg-full-link` branch is kept locally; it is merged and on the fork at `f87345e`. |
+| **`notes` merged to upstream 2.8.3** | Fetched origin first (nothing new from the M4), then `git merge upstream/main`, giving merge commit `4f86af0`. Unpushed: `notes` is 3 commits ahead of origin. |
 | **Branch retired** | Annotated tag `archive/m-series-hw-parakeet` on the old tip (`869a223`). New branch `notes` (tracking unset) from `upstream/main` (`6cfa6c7`), with commit `3c28053` carrying the 26 branch-only files: 19 session summaries, 3 plans, 2 setup docs, `ISSUES.md` and `tests/prototypes/join_copy_p3.py`. The local `m-series-hw-parakeet` branch was deleted after checking that the tag contains its tip. The main checkout is now on `notes`. |
 | **Verification worktrees** | Added detached worktrees `ffmpeg-skill-wt-pr321` (`25a0ef5`) and `ffmpeg-skill-wt-main282` (`6cfa6c7`). |
 
@@ -89,6 +93,12 @@ At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-
   - Both paths report `"version": "2.8.2"` in `package.json`, and the symlink is intact.
   - `diff -rq` of the installed `scripts/` against the v2.8.2 source shows no differences.
   - The installed `doctor` reports ok: 69 capabilities available, 0 missing.
+- **2.8.3 reinstall check:**
+  - `package.json` reports 2.8.3, and the symlink is intact.
+  - `diff -rq` of the installed `scripts/` against `git archive upstream/main scripts` shows no differences.
+  - `doctor` reports ok, with `ffmpeg_source: path`. ffmpeg-full is linked, so no swap is needed.
+- **Worktree-removal check:** `git status --porcelain --ignored` on each worktree showed only generated files, and the readme branch matched `origin/pr/macos-ffmpeg-full-link` (`f87345e`).
+- **`notes` merge check:** `notes` adds nothing outside `docs/`, `ISSUES.md` and `tests/prototypes/`. After the merge, `scripts`, `bin`, `tests/test_contract.py`, `SKILL.md`, `README.md` and `docs/contract.md` are identical to upstream 2.8.3.
 - **Branch-retirement check:**
   - The 26 files on `notes` are byte-identical to the archive tag (`git diff --cached --quiet`).
   - `scripts/`, `tests/test_*.py`, `SKILL.md` and `README.md` are identical to `upstream/main`.
@@ -110,20 +120,21 @@ At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-
 
 ## Current State
 
-- **Main checkout:** on `notes` (upstream 2.8.2 plus the notes commit, tracking unset). `CLAUDE.local.md` is untracked, as before. The local `m-series-hw-parakeet` branch is gone. It survives as the local tag `archive/m-series-hw-parakeet` and on the fork at `59b2c4e` (without today's summary commit `869a223`, which is only in the tag).
-- **Installed skill:** 2.8.2 at `~/.agents/skills/ffmpeg-skill`, reached through the `~/.claude/skills/ffmpeg-skill` symlink.
-- **Worktrees:**
-  - `ffmpeg-skill-wt-bench` at `1d72cb0`, matching origin;
-  - `ffmpeg-skill-wt-readme` at `f87345e` (#319, merged);
-  - `ffmpeg-skill-wt-pr321` and `ffmpeg-skill-wt-main282`, both detached.
+- **Main checkout:** on `notes` at `4f86af0` (upstream 2.8.3 plus the user's docs), tracking origin, 3 commits ahead (unpushed). `CLAUDE.local.md` is untracked, as before.
+- **Old branch:** `m-series-hw-parakeet` survives only as the tag `archive/m-series-hw-parakeet`, which is pushed to the fork. The user deleted the remote branch.
+- **Installed skill:** 2.8.3 at `~/.agents/skills/ffmpeg-skill`, reached through the `~/.claude/skills/ffmpeg-skill` symlink.
+- **Worktrees:** only `ffmpeg-skill-wt-bench` is left, at `1d72cb0` (matching origin), kept while #318 is open.
 - **Homebrew:** `ffmpeg` links to ffmpeg-full again (restored and checked).
-- **Upstream:** at `6cfa6c7` (v2.8.2).
+- **Upstream:** at `f1a4f2a` (v2.8.3).
 
 ## Issues & PRs
 
 - https://github.com/kajisho5/ffmpeg-skill/pull/319: macOS keg-only install hints (the user's). Merged into v2.8.2.
-- https://github.com/kajisho5/ffmpeg-skill/issues/317: find keg-only ffmpeg-full automatically. Open; implemented by #321.
+- https://github.com/kajisho5/ffmpeg-skill/issues/317: find keg-only ffmpeg-full automatically. Closed as completed by #321.
 - https://github.com/kajisho5/ffmpeg-skill/pull/321: the maintainer's resolver. Verification posted at https://github.com/kajisho5/ffmpeg-skill/pull/321#issuecomment-6113231741
+  - The maintainer replied: "that is exactly the check I couldn't run."
+  - They kept the path keys and rewrote the `docs/contract.md` sentence: it now lists `ffmpeg_path` and `ffprobe_path`, and warns that a pasted `doctor` can contain a home-directory path.
+  - Merged 2026-10-11 21:26 UTC (`c1a9d43`) and released as v2.8.3.
 - https://github.com/kajisho5/ffmpeg-skill/issues/318: the ASR benchmark and the `-mc 0` finding. Open, no reply yet.
 - https://github.com/kajisho5/ffmpeg-skill/pull/311#issuecomment-6093159622: the apology and the `test_accel` and 8K results. The maintainer replied: "No need to apologise…"
 - #320 (the maintainer's) was closed in favour of #319.
@@ -139,15 +150,8 @@ At the end, the installed skill was upgraded from 2.3.1 to 2.8.2. The `m-series-
 
 ## Unfinished Work
 
-- **Wait for the maintainer** on #318 (whether `-mc 0` becomes the default or opt-in) before sending a PR, and on #321 (merge, or a response to the "no paths" doc point).
-- **After #321 merges:**
-  - remove the worktrees `ffmpeg-skill-wt-pr321`, `ffmpeg-skill-wt-main282` and `ffmpeg-skill-wt-readme`;
-  - delete the fork branch `pr/macos-ffmpeg-full-link` if wanted.
-- **The user pushes:**
-  ```
-  git push -u origin notes
-  git push origin archive/m-series-hw-parakeet
-  ```
-  Then, once both are on the fork, delete the old remote branch with `git push origin --delete m-series-hw-parakeet`.
+- **Wait for the maintainer on #318:** whether `-mc 0` becomes the default or opt-in, before sending a PR.
+- **The user pushes `notes`:** `git push origin notes`, which sends the 2.8.3 merge and this update.
+- **Optional:** delete the merged branch `pr/macos-ffmpeg-full-link`, locally and on the fork.
 - **Future session summaries go on `notes`.** To bring in new upstream code, `git merge upstream/main` there. It holds only docs, so merges are clean.
 - **Optional:** the `.m4v` `--help` doc gap noted earlier.
