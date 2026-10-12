@@ -85,6 +85,27 @@ exists. When a decision changes, edit the entry in the same PR.
   and `--force` on an untagged file; through 2.2.2 it ran on BT.2020 SDR too and darkened white
   from Y 235 to 151. The result says which path ran (`sdr_path`, `notes`). Code:
   `color.is_bt2020_sdr()`. Test: `test_to_sdr_bt2020_sdr_converts_gamut_without_tonemap`.
+- **`cut.py --segments --accurate` reads every segment with `-reinit_filter 0`, so a colour-tag change
+  inside the source is a label, not a conversion.** The re-cut feeds one `-ss -t -i src` input per
+  segment into one concat graph. By default FFmpeg rebuilds the graph at an input's buffer source when
+  its frames change colour tags; on 8.1.2 that rebuild at a *later* input deadlocked at 0% CPU (an
+  in-band SPS going from untagged to bt470bg/tv, #316), so a 36-segment job sat until `--timeout`.
+  With the option the graph keeps the format it was configured with and the retagged frames pass as
+  decoded. That is acceptable because the tool never converts colour in a cut: an SDR output is
+  tagged BT.709 explicitly and tag-only (`bt709_tag_args`; "without touching its pixels"), and an
+  untagged source is relabelled the same way, so the BT.601-tagged later segment is no different from
+  an untagged one. The rebuild would have converted the retagged side toward the graph's first (unknown)
+  tag (the issue's debug log: `csp:bt470bg -> csp:unknown`), not toward BT.709, so it was no closer to
+  the output's label. A BT.2020/HDR source
+  still takes the HDR path chosen from the first video stream's probe. The cost: a source whose
+  frame *size* or pixel format changes mid-stream is no longer refused by concat's own "parameters do
+  not match" error; on 6.1 the first-format graph then crashes or stalls the encoder (the stall is
+  bounded by `--timeout`). No other tool builds this structure: `join.py`, `multicam.py` and
+  `broll.py` open different files without `-ss`; `speedramp.py`, `freeze.py` and `loop.py` split one
+  input. Code: `cut._join_chunk()`. Test:
+  `test_every_segment_input_of_an_accurate_join_keeps_the_graph_format` (the planned command, any
+  FFmpeg) and `test_an_accurate_join_across_a_colour_tag_change_completes` (the run; it only fails
+  where the deadlock reproduces).
 - **`escape_drawtext()` drops `'` and `%` from burnt-in text** instead of escaping them. Both
   characters have no reliable escape across the FFmpeg versions in CI; a missing apostrophe is a
   known limitation, a broken filter graph is not. Test: `test_drawtext_semicolon_and_quote_render_as_inert_literal_text`.
@@ -835,12 +856,43 @@ not a new file format this tool would have to maintain.
   intermediate is the place for speed; a file that is uploaded is the place for bytes. So
   `FFMPEG_SKILL_HW=1` changes every re-encoding tool's default but not `export.py`'s delivery
   presets, and `render.py --hw` is the one switch that puts a whole project, export included, on
-  the GPU. It is never switched on by anything else (not `--fast`, not a detected GPU). An
+  the GPU. It is never switched on by anything else (not `--fast`, not a detected GPU), with one
+  exception: a build that has no libx264/libx265 to choose instead (next entry). An
   `export.py` run under the variable says in `hw` (`requested: false`, `source: env`, a note) that
   the preset stayed on the CPU and that `--hw` moves it. Code: `_common.runner.apply_common`,
   `add_hw_orchestrator_args`. Tests: `HwResolutionTests`, `test_export_preset_needs_an_explicit_hw`
   (a dry run with VideoToolbox stood in, so it runs on every CI runner),
   `test_the_env_default_reaches_the_other_re_encoding_tools`.
+- **A build without libx264 or libx265 encodes on VideoToolbox without `--hw`, delivery presets
+  included (#314).** The reasons above are about a choice: speed against bytes. An LGPL ffmpeg (a
+  desktop app ships one) has `h264_videotoolbox`/`hevc_videotoolbox` and neither x264 nor x265, so
+  the CPU line is not a slower option, it fails ("Unknown encoder 'libx264'"), and "a file that is
+  uploaded is the place for bytes" and "never switched on by anything else" have nothing to protect.
+  So when the encoder list (`ffmpeg -encoders`) was read and lacks the CPU encoder the line would
+  name (libx264 for H.264, libx265 for HEVC, each on its own), the matching VideoToolbox encoder is
+  in it, and this machine passes `hw_platform_reason()` (Apple Silicon, the check `--hw` uses), every
+  re-encoding tool and every fixed `export.py` preset (`reels`, `youtube`, `h265`, ...) takes the
+  VideoToolbox line, built exactly as under `--hw`. The result says `hw: {requested: false, source:
+  "auto", used, ...}` with a note naming the encoder that was missing and the one that ran, and the
+  usual `notes` line that the quality is not CRF-equivalent (without the `--no-hw` advice: it has no
+  CPU encoder to go back to). What does not change: a build that has the CPU encoder takes exactly
+  the line it did (the platform is asked before the encoder list, so Linux and Windows read no list
+  for this, and the Mac reads it once per process); `FFMPEG_SKILL_HW=1` still does not move the
+  presets (the request to make it cover them was declined: with libx264 in the build the preset
+  stays where the first entry puts it, and without it the build decides, so the variable has nothing
+  left to add); an explicit `--no-hw` (or `render.py`/`batch.py --no-hw`) is the caller's choice of
+  the CPU and is not overridden, ffmpeg then refuses it as before; `FFMPEG_SKILL_HW=0` is no flag
+  and does not stop it; AV1 and ProRes are out of scope (their own missing-encoder refusals stand).
+  An unreadable encoder list (empty) proves nothing is missing and changes nothing. No CPU line is
+  recorded for it, so a job VideoToolbox refuses is a plain `kind: ffmpeg` failure naming
+  `h264_videotoolbox`, not a retry that could not run. `doctor` agrees: a missing
+  `encoder:libx264`/`libx265` whose VideoToolbox encoder is in the build, on a machine that passes the
+  same check, is listed under the additive `covered_by` and in neither `available` nor `missing`, so
+  `ok` and each tool's `usable` stand for what will run; the contract's `required`/`optional`
+  capability lists are unchanged. Code: `_common.decision._vt_in_place_of`, `_maybe_hw`,
+  `hw_preset_video`; `_contract._covered_by_videotoolbox`. Tests: `NoCpuEncoderTests`,
+  `test_a_build_without_libx264_is_usable_where_videotoolbox_takes_its_place`,
+  `test_libx264_stays_required_without_videotoolbox_or_off_apple_silicon`.
 - **CRF maps to VideoToolbox `-q:v` on the safe side, with a separate HDR curve.**
   `vt_quality` takes, at each CRF, the highest `-q:v` whose SSIM matched the CPU encode across
   `tests/bench_vt.py`'s clips (synthetic CG, fractal and grain, iPhone 17 Pro SDR and HLG at 30
@@ -1015,6 +1067,28 @@ not a new file format this tool would have to maintain.
   each engine's source and process, so `network: false` cannot be read as "a first
   `--transcribe` is network-free". Tests: `InstallHintTests`,
   `test_the_network_claim_matches_where_each_engine_runs`.
+- **whisper.cpp transcribes with `-mc 0`, by default.** Whisper conditions each window on the text
+  before it, and once a hallucinated line is in that context it can repeat it for the rest of the
+  file: in the contributor's benchmark (#318, six English sets of ~10 min, whisper.cpp 1.9.5)
+  large-v3-turbo repeated one sentence ~300 times on two sets, and on common_voice lost about the
+  last 7 minutes of speech. `-mc 0` (`--max-context 0`, previous-text tokens kept: none) removed both
+  loops and lowered every model's word-weighted WER: base 19.87 -> 18.33, small 17.07 -> 15.42,
+  large-v3-turbo 69.12 -> 12.52. It is a decoding change, not a free one: gigaspeech is worse for all
+  three models (13.16 -> 14.11 for large-v3-turbo) and some single cells are (small on
+  common_voice 16.44 -> 19.28, large-v3-turbo on ami 25.72 -> 27.55). It is the default rather than
+  an opt-in because a loop that silently loses minutes of speech is a defect, which the 2.x promise
+  ("behaviour may change to fix a defect, with a CHANGELOG line") allows, and because the net is
+  better for every model measured; an opt-in would leave the loss with everyone who does not know to ask.
+  It is given to the two whisper.cpp commands that write a transcript (the SRT of `caption.py
+  --transcribe` and the `--output-json-full` word timings of `silence.py --filler --transcribe`) and
+  not to language detection (`-dl`: it reads the first 30 s and writes no transcript), nor to any other
+  engine: faster-whisper, openai-whisper and Parakeet are not whisper.cpp and were not measured. No
+  repetition detector was added: the flag removes the cause, a detector would be a second decoder to
+  maintain. Every whisper.cpp binary name the skill runs (`whisper-cli`, `whisper-cpp`, `main`) is
+  documented to take `-mc` (the flag is years old); a build that rejected it would write no file, so
+  the run reads as "whisper.cpp found but failed" with the build's last output line and the next
+  engine is tried (`engine_failed` when whisper.cpp was named). Reverse this if a measurement on other material shows `-mc 0` costing more than the
+  loops it prevents. Test: `WhisperContextTests`.
 
 ## Unreleased — cuts that say what they did
 
