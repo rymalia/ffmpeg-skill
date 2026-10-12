@@ -86,7 +86,7 @@ animation, shaders, GPU preview, and one encode for any number of elements.
 
 ## Next steps
 
-1. ~~Refresh `~/.agents/skills/fframes-video`~~ Done 2026-10-12 from fframes.studio (lock now `well-known`); see `~/projects/fframes/docs/notes/2026-10-12-upstream-1.2.0-status.md` (fframes `main` 80f4f63), which also records that `feat/bt709-colour` conflicts with upstream in 3 files.
+1. ~~Refresh `~/.agents/skills/fframes-video`~~ Done 2026-10-12 from fframes.studio (lock now `well-known`); see `~/projects/fframes/docs/notes/2026-10-12-upstream-1.2.0-status.md` (fframes `main` 56ea79a after the 2026-10-12 rebase onto origin/main), which also records that `feat/bt709-colour` conflicts with upstream in 3 files.
 2. Optional: file an ffmpeg-skill issue for `video`/`chromakey` keys in `render.py` `overlays[]`.
 3. video-motion: diff `feat/bt709-colour` against upstream `4a752de`, and keep only the encode side.
 4. No action on video-editing-skill or motion-graphics-skill.
