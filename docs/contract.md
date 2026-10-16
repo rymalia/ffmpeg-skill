@@ -21,7 +21,7 @@ The contract is derived from the code that runs, not maintained beside it:
 | Field | Meaning | Changes when |
 |---|---|---|
 | `contract_version` | shape of this document (`1.0`) | a key is renamed, removed or changes meaning |
-| `skill.version` | the npm / package.json version (`2.8.6`) | any release |
+| `skill.version` | the npm / package.json version (`2.10.3`) | any release |
 
 A release that adds a tool or a flag keeps `contract_version`; a breaking change to the
 ToolSpec shape bumps it. Consumers pin on `contract_version` and read `skill.version`
@@ -119,7 +119,7 @@ JSON would have been rewritten for that. The flat keys, typed per tool in `outpu
   "contract_version": "1.0",
   "deprecated": [],
   "removed": [{"what": "...", "since": "1.10.0", "replacement": "...", "removed_in": "2.0.0", "where": "cli | json | mcp | behaviour"}],
-  "skill": {"id": "ffmpeg-skill", "version": "2.8.6", "execution_mode": "local", "kind": "execution",
+  "skill": {"id": "ffmpeg-skill", "version": "2.10.3", "execution_mode": "local", "kind": "execution",
             "entrypoints": {"cli": "...", "mcp": "...", "contract": "...", "doctor": "..."},
             "not_provided": ["AI reasoning", "decisions", "production plans", "project IR", "approvals", "network access", "transcription engine"]},
   "requirements": {"python": ">=3.9 (standard library only)", "ffmpeg": ">=5.0", "ffprobe": ">=5.0"},
@@ -217,6 +217,20 @@ BT.709 for SDR; av1 is SVT-AV1 with libaom as the fallback; prores is 422 HQ and
 its default is the tool's own (18, `proxy.py` 30). 1.x also accepted `--crf` as an alias; 2.0
 removed it (`export.py` keeps its own `--crf`). Without `--codec` the encoder is what it always was (x264 for SDR, x265
 Main10 for HDR), so the flags add no behaviour to a caller that does not pass them.
+Every SDR line except prores is tagged BT.709; a source whose matrix is BT.601 (`smpte170m`,
+`bt470bg`, or `fcc`/`smpte240m`) is converted to it in the filter graph (`colorspace`, matrix
+only; `_common.bt709_matrix_filter()`), so the label and the pixels agree. An untagged or BT.709
+source adds no filter, and the tags themselves never convert (`bt709_tag_args()`). An RGB picture
+(a PNG or JPEG still, a PNG sequence, a qtrle clip, an `overlay --image` logo, an emoji PNG,
+`waveform --image`) is converted to BT.709 YUV explicitly (`scale=out_color_matrix=bt709`; a JPEG is
+a `bt470bg` source); `grid.py` converts each cell by its own tags. Where a converted picture meets an
+untagged one in a mixing filter, the untagged one is labelled BT.709 (`setparams`, tags only), so
+FFmpeg 7.1+'s colourspace negotiation converts neither (`join`, `multicam`, `broll` and `overlay --video`
+too, beside a converted clip). A colour a tool draws from a hex or named value (a pad, `tpad` or
+`rotate` fill, `drawtext` and libass text and boxes, a `graphics.py` box or bar, `background.py`'s
+`color`/`gradients`, `waveform.py`'s plate and waves) lands in the same BT.709: from FFmpeg 7.1
+an untagged picture is labelled for the drawing filters, before 7.1 the drawing runs on an RGB copy
+and only the pixels it touched are taken from it (`_common.drawn_chain()`); a grey changes nothing.
 `cut.py --keep-hevc` (opt-in) re-encodes an SDR HEVC source as x265 8-bit BT.709 instead of x264; an HDR or
 BT.2020 source keeps the Main10 line with its own colour tags, with or without the flag. The
 encoder each value needs is listed under the tool's optional capabilities (`--codec hevc` and
@@ -378,7 +392,11 @@ engine present. Whisper is never a dependency of this skill.
 `external:parakeet` is the same kind of optional capability for the same two flags:
 parakeet-mlx, or parakeet-cli with a `.gguf` model it can find. Either engine family
 satisfies `--transcribe`; `--engine auto` (the default, or `FFMPEG_SKILL_ASR_ENGINE`) runs
-Parakeet for English speech and Whisper for every other language. When no `--language` is given
+Parakeet for English speech and Whisper for every other language. `--model` (both tools) is the
+model; without it `FFMPEG_SKILL_ASR_MODEL` is this machine's default, else `base`. An explicit
+`--model` goes to whichever engine runs; a Parakeet model in the variable goes to the Parakeet
+engines only, and the Whisper engines keep `base`. `doctor` reports neither variable (it prints no
+environment values); the result's `transcription.model` names the model that ran. When no `--language` is given
 and no detector can name it, a Whisper engine that can run takes it (whisper.cpp is passed
 `-l auto`: its own default is English). Parakeet then runs only on English *assumed* -- when no
 Whisper engine is installed, or every one failed, or `--model` names an English-only Parakeet

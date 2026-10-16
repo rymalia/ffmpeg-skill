@@ -558,7 +558,7 @@ silence.py INPUT [--threshold -35] [--min-silence 0.6] [--margin 0.15] [--min-ke
 silence.py INPUT --filler --words transcript.json [--filler-lang auto|en|ja|es|de|fr|pt|it]
            [--filler-words FILE] [--filler-extra W,W] [--filler-keep W,W] [--filler-pad 0.02]
            [--transcribe] [--engine auto|parakeet-mlx|parakeet.cpp|whisper.cpp|faster-whisper|openai-whisper]
-           [--filler-list] [--max-cuts 400]
+           [--model MODEL] [--filler-list] [--max-cuts 400]
 ```
 Runs `silencedetect`, keeps `--margin` seconds of air around speech, drops
 gaps shorter than `--min-silence`, and re-encodes once with `select`/`aselect`
@@ -734,6 +734,23 @@ stem wins, and a stems level with no file to apply it to (`effects` without
 `"effects"`, `music` without `"music"`) is refused, `kind: input`.
 `"audio": {"voice": "light"|"medium"|"strong"}` picks the voice strength
 (`true` is `medium`).
+
+An `overlays[]` entry draws one of `"logo": true`, `"image"`, `"text"` or
+`"video"` (#326: a picture-in-picture or green-screen layer, `overlay.py
+--video`), with `position`, `scale`, `opacity`, `start`, `end`, `margin`,
+`platform` (and `fade`, `box`, `font*` for the still/text kinds) mapping to
+overlay.py's flags. `"chromakey": "0x00ff00"`, `"chromakey_similarity"` and
+`"chromakey_blend"` key a colour out of the video layer. The stage runs after
+`fit`, so `"scale": 480` is 480 px of the delivered frame, and a template's
+safe margins apply as they do to a logo. Refused (`kind: input`) before the
+first stage: `video` together with `logo`/`image`/`text` in one entry (a
+logo, image and text together still draw the first of them, as before), a
+`chromakey*` key without `video`, `chromakey_similarity`/`_blend` without
+`chromakey`, and a layer file that does not exist (under `--dry-run` too: no
+earlier stage writes it). The layer's content is in the stage's `--cache`
+key, so replacing the file re-runs `overlays` and what follows it; paths are
+relative to the project file; `--export-timeline` lists the layer under
+`not_exported`.
 
 `"chapters"` is a chapters file path, or an inline list of `{"at": TIME,
 "title": STR}`; it runs `metadata.py` on the delivered file as the last stage
@@ -1025,12 +1042,14 @@ missing one is `kind: missing_tool`; an installed one that fails is `kind: input
 engine_failed`, with its own error line in `detail`). Without a language whisper.cpp is passed
 `-l auto` (its own default is English), else the named or detected language, and `-mc 0` (no
 previous-text context, so one hallucinated line is not repeated to the end of the file; #318). `--model` is the
-whisper model; a Parakeet engine takes it only when it names a Parakeet model
+whisper model (default `FFMPEG_SKILL_ASR_MODEL`, this machine's default, else `base`); a Parakeet engine takes it only when it names a Parakeet model
 (`mlx-community/parakeet-*` or a `.gguf`), else `PARAKEET_MODEL` / `PARAKEET_CPP_MODEL`, else the
-English `tdt-0.6b-v2`. A non-English `--language` on an English-only Parakeet model is refused; a
+English `tdt-0.6b-v2`. A Parakeet model in `FFMPEG_SKILL_ASR_MODEL` goes to the Parakeet engines
+only (the Whisper engines keep `base`); one given with `--model` goes to whichever engine runs.
+A non-English `--language` on an English-only Parakeet model is refused; a
 multilingual (v3) model assumes no language, so it gets no English-assumed note. The result's
 `transcription` names the engine, model and routing. `silence.py --filler --transcribe` takes
-the same `--engine`.
+the same `--engine` and `--model`.
 Nothing is required: without an engine it prints install hints and the user can supply `--text`
 cues instead. When engines are installed but none transcribed, the refusal names each and why
 instead (`reason: engine_failed`, or `english_only` for a Parakeet engine auto passed over for
@@ -1596,7 +1615,7 @@ export.py INPUT --preset youtube|youtube4k|reels|tiktok|shorts|linkedin|facebook
                 [--fit pad|crop] [--no-scale] [--allow-long] [--crf N] [--normalize] [-o OUT]
 export.py --list
 ```
-Scales into the preset frame (pad by default), tags BT.709, sets `+faststart`,
+Scales into the preset frame (pad by default), tags BT.709 (a BT.601-matrix or RGB source is converted to it, as by every re-encode), sets `+faststart`,
 trims to platform maximums (Reels 90 s, X 140 s) unless `--allow-long`. It
 does not touch levels: for youtube / youtube4k / reels / x the written file is
 measured and the result's `loudness` (and a `notes` line) says when it is

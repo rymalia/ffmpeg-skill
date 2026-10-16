@@ -35,8 +35,8 @@ import os
 import sys
 
 from _platforms import PLATFORMS, PLATFORM_CHOICES, resolve as resolve_platform
-from _common import (add_common, apply_common, aac_args, default_output, die, emit, ffmpeg_base,
-                     info, load_brand, pad_filters, probe, run, STATE, validate_color, video_args, X264_PRESETS,
+from _common import (add_common, apply_common, aac_args, default_output, die, draws_chroma, emit, ffmpeg_base,
+                     info, load_brand, pad_filters, probe, rgb_chain_to_bt709, run, STATE, validate_color, video_args, X264_PRESETS,
                      fmt_secs, child_args, run_tool, measured_level_dbfs)
 from _common.emit import absorb_stage_hw
 
@@ -185,13 +185,22 @@ def main() -> int:
         graph = f"[1:v]{plate},format=rgba[plate];[0:a:{args.audio_stream}]{vf},format=rgba"
         if args.opacity < 1.0:
             graph += f",colorchannelmixer=aa={args.opacity:g}"
-        graph += f"[vis];[plate][vis]overlay=x=(W-w)/2:y={vis_y}:format=auto[v]"
+        # the composite is RGBA (the plate is): converted to the BT.709 the output is tagged with,
+        # not by the encoder's BT.601 default
+        graph += f"[vis];[plate][vis]overlay=x=(W-w)/2:y={vis_y}:format=auto{rgb_chain_to_bt709(None, 'yuv420p')}[v]"
         vf = graph
     else:
         # showwaves/showspectrum paint the visualization on a transparent-black canvas; composite
         # it over an explicit solid background instead of assuming that canvas already matches
         # --background.
-        vf = f"color=c={args.background}:s={args.width}x{args.height}:r={args.fps:g}[bg];[0:a:{args.audio_stream}]{vf}[vis];[bg][vis]overlay=format=auto"
+        bg, vis = f"color=c={args.background}:s={args.width}x{args.height}:r={args.fps:g}", vf
+        if draws_chroma([args.background] + (args.color.split("|") if args.style == "waveform" else []), None):
+            # the background and the RGBA waves are converted to the BT.709 the output is tagged
+            # with (the encoder line's own RGB-to-YUV step used BT.601); the spectrum is YUV of its
+            # own and only gets the label the background carries, so 7.1+'s overlay converts neither
+            bg += ",format=rgb24" + rgb_chain_to_bt709(None, "yuv420p")
+            vis += rgb_chain_to_bt709(None, "yuva420p") if args.style == "waveform" else ",setparams=colorspace=bt709"
+        vf = f"{bg}[bg];[0:a:{args.audio_stream}]{vis}[vis];[bg][vis]overlay=format=auto"
 
     render = output
     if args.title or args.srt or args.text:

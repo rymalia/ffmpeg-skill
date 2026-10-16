@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-from _common import STATE, add_common, apply_common, bt709_tag_args, child_args, emit, cfr_args, default_output, die, encoder_args, ffmpeg_base, info, probe, run, run_tool, validate_color, pad_filters, add_pad_fill_args, fmt_secs
+from _common import STATE, add_common, apply_common, bt709_matrix_args, bt709_tag_args, child_args, emit, cfr_args, default_output, die, encoder_args, ffmpeg_base, info, probe, run, run_tool, validate_color, pad_filters, add_pad_fill_args, fmt_secs
 from _common.decision import hw_preset_video, restate_last_swap
 from check import SPECS as PLATFORMS, measure_loudness
 from _platforms import ALIASES as _ALIASES, PLATFORMS as PLATFORM_TABLE, resolve as resolve_platform
@@ -165,7 +165,10 @@ def main() -> int:
             if args.fit == "crop":
                 vf += [f"scale={p['w']}:{p['h']}:force_original_aspect_ratio=increase", f"crop={p['w']}:{p['h']}"]
             else:
-                vf.append(pad_filters(p["w"], p["h"], args.pad_fill, args.pad_color, args.pad_blur))
+                # a --pad-color with chroma is drawn in the BT.709 the line is tagged with; a GIF is
+                # not tagged, and palettegen reads the pad back with the same BT.601 it was drawn in
+                vf.append(pad_filters(p["w"], p["h"], args.pad_fill, args.pad_color, args.pad_blur,
+                                      meta=None if args.preset == "gif" else meta))
             vf.append("setsar=1")
         else:
             vf.append(f"scale={p['w']}:-2")
@@ -216,6 +219,11 @@ def main() -> int:
             cmd += cfr_args(meta)
         if tag_bt709 and not video[video.index("-c:v") + 1].endswith("_videotoolbox"):
             cmd += bt709_tag_args(video[video.index("-c:v") + 1])
+        if args.preset != "prores":
+            # every line but the prores master's says BT.709 (the fixed presets' tags above, an
+            # SDR hevc/av1 line's own): a BT.601 source's pixels are converted to match, in front
+            # of the -vf above (run() folds the two); an untagged, BT.709 or HDR source adds nothing
+            cmd += bt709_matrix_args(meta)
     if out_ext == "mp4":
         cmd += ["-movflags", "+faststart"]
     cmd += (p["audio"] if has_audio else ["-an"])

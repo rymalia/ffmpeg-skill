@@ -14,12 +14,14 @@ import argparse
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from _common.color import bt709_tag_args, _sdr_bt709
+from _common.color import (bt709_label_filter, bt709_matrix_args, bt709_matrix_filter, bt709_tag_args, drawn_stream_format,
+                           is_neutral_color, rgb_island, rgb_to_bt709_filter, _sdr_bt709)
 from _common.emit import die
 from _common.runner import CODECS, STATE, ffmpeg_encoders, ffmpeg_version, hw_platform_reason
 
 
-def pad_filters(out_w: int, out_h: int, fill: str, color: str, blur: int, darken: float = 0.0) -> str:
+def pad_filters(out_w: int, out_h: int, fill: str, color: str, blur: int, darken: float = 0.0,
+                meta: Optional[Dict[str, Any]] = None) -> str:
     """The letterbox/pillarbox step shared by fit.py and export.py, as one -vf segment.
 
     fill="color": scale to fit, then pad with a solid colour (the historical behaviour).
@@ -30,7 +32,10 @@ def pad_filters(out_w: int, out_h: int, fill: str, color: str, blur: int, darken
     needed beyond the usual scale/pad set, and that is already required by redact.py.
     `darken` > 0 also dims that background copy by that much brightness (eq), so the picture in
     front reads as the subject instead of competing with a bright blurred copy of itself --
-    what `fit.py --fit blur` uses (1.14)."""
+    what `fit.py --fit blur` uses (1.14).
+    `meta`: the probe of the picture being padded, when the output is that picture's re-encode: a
+    --pad-color with chroma is then drawn in the BT.709 the line tags (drawn_chain()). Without it
+    (a still made RGB, an export to GIF) the pad is what it always was."""
     if fill == "blur":
         # boxblur rejects a radius larger than half the smaller dimension ("radius 20, must be
         # <= 8" on a 16 px target); clamp instead of failing an otherwise valid request
@@ -40,7 +45,9 @@ def pad_filters(out_w: int, out_h: int, fill: str, color: str, blur: int, darken
                 f"boxblur={radius}:2" + (f",eq=brightness=-{darken:g}" if darken else "") + "[__fitbgb];"
                 f"[__fitfg]scale={out_w}:{out_h}:force_original_aspect_ratio=decrease[__fitfgs];"
                 f"[__fitbgb][__fitfgs]overlay=(W-w)/2:(H-h)/2:format=auto")
-    return f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color={color}"
+    pad = f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color="
+    return (f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,"
+            + (pad + color if meta is None else drawn_chain(pad + color, meta, [color], pad + "black", tag="pad")))
 
 
 def add_pad_fill_args(parser: "argparse.ArgumentParser") -> None:
@@ -497,28 +504,114 @@ def _x264_raw(crf: int, preset: str, keep_bt709: bool = True) -> List[str]:
     return args
 
 
-def x264_args(crf: int = 18, preset: str = "medium", keep_bt709: bool = True) -> List[str]:
+def x264_args(crf: int = 18, preset: str = "medium", keep_bt709: bool = True,
+              source: Optional[Dict[str, Any]] = None) -> List[str]:
     """SDR H.264 encoder args -- or, when --codec named another encoder, that encoder's SDR args
-    (color.py's --to-sdr path builds its own H.264 line; the flag still has to reach it)."""
+    (color.py's --to-sdr path builds its own H.264 line; the flag still has to reach it).
+
+    `source`: the probe of the file being re-encoded, when the pixels reaching the encoder are
+    still that file's. A BT.709-tagged line then carries the conversion of a non-BT.709 matrix
+    (bt709_matrix_args); a caller whose graph already outputs BT.709 (--to-sdr) leaves it out."""
     if STATE.codec and STATE.codec != "h264":
-        return encoder_args(STATE.codec, crf, preset, None, keep_bt709)
-    return _maybe_hw("h264", crf, None, keep_bt709, _x264_raw(crf, preset, keep_bt709))
+        args = encoder_args(STATE.codec, crf, preset, None, keep_bt709)
+    else:
+        args = _maybe_hw("h264", crf, None, keep_bt709, _x264_raw(crf, preset, keep_bt709))
+    return args + (bt709_matrix_args(source) if keep_bt709 and STATE.codec != "prores" else [])
 
 
-def video_args(meta: Optional[Dict[str, Any]], crf: int = 18, preset: str = "medium") -> List[str]:
+def video_args(meta: Optional[Dict[str, Any]], crf: int = 18, preset: str = "medium", convert_matrix: bool = True,
+               source: Optional[Dict[str, Any]] = None) -> List[str]:
     """Encoder args that preserve what the source is.
 
     SDR sources -> H.264 8-bit tagged BT.709 (x264_args). HDR sources (HDR10/PQ, HLG,
     Dolby Vision base layer, BT.2020) -> HEVC Main10 with the source's own colour tags,
     so cutting/captioning/fitting an iPhone HDR clip stays HDR instead of becoming a
     washed-out file mislabelled as BT.709. Use color.py --to-sdr when SDR is wanted.
+
+    An SDR source tagged with a BT.601 (or another non-BT.709) matrix is converted to BT.709
+    before it is tagged so: the line ends with the `-vf` of bt709_matrix_args(), which run()
+    folds into the tool's own graph (color.fold_bt709_matrix). `convert_matrix=False` is for a
+    tool that mixes several sources and converts each one in its own graph (join, multicam,
+    broll, overlay --video). --codec prores keeps the source's tags, so it converts nothing.
+    An RGB source (a PNG, an image sequence, a qtrle clip) is converted the same way.
+
+    `source`: the probe of the picture the encoder gets when the line is chosen without it
+    (insert.py and sequence.py make a still or a PNG sequence into video on the SDR line,
+    video_args(None)); its RGB or BT.601 pixels are converted to the BT.709 that line is tagged with.
     """
-    if STATE.codec:
-        return encoder_args(STATE.codec, crf, preset, meta)
     v = (meta or {}).get("video") or {}
+    fix = bt709_matrix_args(meta if source is None else source) if convert_matrix and STATE.codec != "prores" else []
+    if STATE.codec:
+        return encoder_args(STATE.codec, crf, preset, meta) + fix
     if not v.get("bt2020_or_hdr"):
-        return x264_args(crf, preset)
+        return x264_args(crf, preset) + fix
     return _maybe_hw("hevc", crf, meta, True, _x265_hdr_default(v, crf, preset))
+
+
+def matrix_chain(meta: Optional[Dict[str, Any]], line_meta: Optional[Dict[str, Any]]) -> str:
+    """For a tool that mixes several sources in one graph and encodes it through
+    video_args(line_meta, convert_matrix=False): the conversion one source's own chain starts
+    with ("<filter>," -- bt709_matrix_filter), or "" when that source needs none or the line does
+    not tag BT.709 (an HDR/BT.2020 line keeps its tags, --codec prores keeps the source's)."""
+    if STATE.codec == "prores" or ((line_meta or {}).get("video") or {}).get("bt2020_or_hdr"):
+        return ""
+    f = bt709_matrix_filter(meta)
+    return f + "," if f else ""
+
+
+def label_chain(meta: Optional[Dict[str, Any]], line_meta: Optional[Dict[str, Any]]) -> str:
+    """For a picture that meets a converted one in a mixing filter (a still over the video, a grid
+    cell beside a converted cell), encoded through video_args(line_meta): the BT.709 label an
+    untagged one's chain starts with ("<setparams>," -- bt709_label_filter), or "" (a tagged, RGB or
+    HDR picture, or a line that does not tag BT.709)."""
+    if STATE.codec == "prores" or ((line_meta or {}).get("video") or {}).get("bt2020_or_hdr"):
+        return ""
+    f = bt709_label_filter(meta)
+    return f + "," if f else ""
+
+
+def rgb_chain_to_bt709(line_meta: Optional[Dict[str, Any]], pix_fmt: str = "yuva420p") -> str:
+    """For a picture the tool's own graph has made RGB(A) -- a still's `format=rgba` chain
+    (overlay.py --image, an emoji PNG) or an RGBA composite (waveform.py's --image plate) -- that
+    is encoded through video_args(line_meta): "," + the conversion to BT.709 YUV to end that chain
+    with (rgb_to_bt709_filter), or "" when the line does not tag BT.709 (the lines matrix_chain()
+    leaves alone). Without it the graph's own RGB-to-YUV step used FFmpeg's BT.601 default."""
+    if STATE.codec == "prores" or ((line_meta or {}).get("video") or {}).get("bt2020_or_hdr"):
+        return ""
+    return "," + rgb_to_bt709_filter(pix_fmt)
+
+
+def draws_chroma(colours: Sequence[Any], line_meta: Optional[Dict[str, Any]]) -> bool:
+    """True when one of `colours` has chroma (is_neutral_color) and the line video_args(line_meta)
+    tags the output BT.709 -- when a drawn colour needs drawn_chain() at all."""
+    return (not all(is_neutral_color(c) for c in colours if c is not None) and STATE.codec != "prores"
+            and not ((line_meta or {}).get("video") or {}).get("bt2020_or_hdr"))
+
+
+def drawn_chain(colour_chain: str, meta: Optional[Dict[str, Any]], colours: Sequence[Any], neutral_chain: str = "null",
+                line_meta: Any = "same", tag: str = "d", labelled: bool = False) -> str:
+    """`colour_chain` -- filters that draw a colour into the picture `meta` probes (drawtext's
+    font/box/border colours, pad/tpad's fill, rotate's fillcolor, libass) -- so that a colour of
+    `colours` lands in the BT.709 the line video_args(line_meta) tags the output with (line_meta
+    defaults to meta).
+
+    FFmpeg's drawing filters turn an RGB colour into YUV with a matrix of their own (ff_draw):
+    BT.601 always up to 7.0, the link's colourspace from 7.1 on, "unknown" read as BT.601. Through
+    2.10.2 a drawn colour was BT.601 under a BT.709 tag on every build (pure red decoded as
+    (255,24,0)), and on 5.1/6.1 for a BT.709-tagged source too. From 7.1 an untagged picture gets
+    its BT.709 label (label_chain(): tags only) and the filters follow it; before 7.1 the drawing
+    runs in RGB (rgb_island(), `neutral_chain` being the same filters with a black fill, or null).
+
+    Unchanged: a chain whose colours are all greys (the same YUV under every matrix: the default
+    black pads and white text), a line that does not tag BT.709 (HDR, prores). `labelled`: the
+    caller's graph already labels this picture (label_chain()) earlier in the same chain."""
+    line = meta if line_meta == "same" else line_meta
+    if not draws_chroma(colours, line):
+        return colour_chain
+    if ffmpeg_version() >= (7, 1):
+        return ("" if labelled else label_chain(meta, line)) + colour_chain
+    pix_fmt, full = drawn_stream_format(meta)
+    return rgb_island(colour_chain, neutral_chain, pix_fmt, full, tag)
 
 
 def source_codec_video_args(meta: Optional[Dict[str, Any]], crf: int = 18, preset: str = "medium",
@@ -530,7 +623,7 @@ def source_codec_video_args(meta: Optional[Dict[str, Any]], crf: int = 18, prese
     source always takes video_args()'s Main10 line, and --codec always wins."""
     v = (meta or {}).get("video") or {}
     if keep_hevc and not STATE.codec and v.get("codec") == "hevc" and not v.get("bt2020_or_hdr"):
-        return encoder_args("hevc", crf, preset, meta)
+        return encoder_args("hevc", crf, preset, meta) + bt709_matrix_args(meta)
     return video_args(meta, crf, preset)
 
 

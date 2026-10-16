@@ -91,10 +91,12 @@ exists. When a decision changes, edit the entry in the same PR.
   its frames change colour tags; on 8.1.2 that rebuild at a *later* input deadlocked at 0% CPU (an
   in-band SPS going from untagged to bt470bg/tv, #316), so a 36-segment job sat until `--timeout`.
   With the option the graph keeps the format it was configured with and the retagged frames pass as
-  decoded. That is acceptable because the tool never converts colour in a cut: an SDR output is
-  tagged BT.709 explicitly and tag-only (`bt709_tag_args`; "without touching its pixels"), and an
-  untagged source is relabelled the same way, so the BT.601-tagged later segment is no different from
-  an untagged one. The rebuild would have converted the retagged side toward the graph's first (unknown)
+  decoded. That is acceptable because no colour conversion in a cut follows the frames' own tags: an
+  SDR output is tagged BT.709 explicitly and tag-only (`bt709_tag_args`), and the one conversion a cut
+  can carry (a source whose *probed* matrix is BT.601, `bt709_matrix_filter`) takes the source's
+  matrix as an explicit input property, so every segment of one source goes through the same one. An
+  untagged source (#316's starts untagged) is relabelled, as before, so the BT.601-tagged later
+  segment is no different from an untagged one. The rebuild would have converted the retagged side toward the graph's first (unknown)
   tag (the issue's debug log: `csp:bt470bg -> csp:unknown`), not toward BT.709, so it was no closer to
   the output's label. A BT.2020/HDR source
   still takes the HDR path chosen from the first video stream's probe. The cost: a source whose
@@ -115,6 +117,120 @@ exists. When a decision changes, edit the entry in the same PR.
   is a deliverable, keep the HDR (10-bit HEVC) path. Test: `test_grid_composites_cols_rows_with_labels`.
 - **`look.py -o` is used verbatim only for a single `--at` with an image extension**; several frames,
   or `-o` given as a stem, produce `<stem>_<t>s.png` names. Test: `test_hdr_source_stays_hdr_through_reencodes`.
+- **`check.py`'s colour row WARNs on a BT.601 matrix and names `export.py`, not `--retag`.** The
+  matrix is a tag (#325): a file tagged only `smpte170m`/`bt470bg` is BT.601, not "untagged". Every
+  re-encode here converts it to the BT.709 it tags (the entry below; through 2.10.0 nothing did, and
+  this fix said to re-export from the master); `color.py --retag bt709` is a stream copy that only
+  relabels it, which shifts the colours of BT.601 pixels, so the fix says that too. Untagged 8-bit
+  video, or a BT.709 matrix alone, still passes: players assume BT.709. Code: `check.py`, the colour
+  row. Test: `test_check_colour_row_reads_the_matrix_tag`.
+- **A source with a BT.601 matrix is converted to BT.709 when it is re-encoded; an untagged one is
+  not.** Every SDR line but prores is tagged BT.709, and the tags are labels (`bt709_tag_args`), so
+  a `smpte170m`/`bt470bg` (or `fcc`/`smpte240m`) source used to come out labelled BT.709 over
+  BT.601 pixels: 48.5 dB YUV PSNR against its source on 6.1, every tag-honouring player showing
+  shifted colours. `bt709_matrix_filter()` now converts it with the `colorspace` filter (in every
+  FFmpeg build, explicit input properties, so no build's tag negotiation decides it). Untagged
+  stays a relabel on purpose: players take untagged SDR as BT.709, and converting it is exactly the
+  7.1 auto-conversion `bt709_tag_args` avoids. Only the **matrix** is converted; primaries and
+  transfer pass through: the matrix is what every decoder applies, SMPTE-C/EBU primaries are
+  shown as BT.709 by every player that does not colour-manage, a full conversion moved testsrc2 to
+  22.5 dB RGB PSNR from what such a player shows, and a `bt470bg` (gamma 2.8) transfer tag on SD
+  material is usually a label, not the camera's curve. The range is left as it is. The filter
+  rides on the encoder line as a `-vf` (`video_args()`, `x264_args(source=...)`, export's preset
+  line) and `run()` folds it into the
+  tool's own graph as its first step (`fold_bt709_matrix()`), so the tools that re-encode one
+  source needed no edit of their own; `join`, `multicam`, `broll` and `overlay --video` convert each
+  input by its own tags in its own chain (`matrix_chain()`), since one source's tags say nothing
+  about another's. Not converted: a stream copy, a prores master, an HDR/BT.2020 source.
+  Measured on 5.1.1, 6.1 and a 7.1 development snapshot that predates 7.1's colour
+  negotiation (CI runs 8.x): 42.2 dB RGB PSNR between the source decoded
+  as BT.601 and the output decoded as BT.709 (24.8 dB for the old relabel), untagged and BT.709
+  sources unchanged. Code: `_common/color.py`. Tests:
+  `test_a_bt601_source_is_converted_to_the_bt709_it_is_tagged_with`,
+  `test_an_untagged_or_bt709_source_is_not_converted`,
+  `test_every_reencoding_tool_plans_the_bt601_conversion`,
+  `test_fold_bt709_matrix_into_the_tools_graph`.
+- **An RGB picture is converted to BT.709 YUV by an explicit `scale`, where it enters; an untagged
+  picture that meets a converted one is labelled, not converted.** An RGB picture (PNG/JPEG still,
+  logo, emoji PNG, PNG sequence, qtrle clip) has no matrix of its own: FFmpeg gives it one wherever
+  the graph first needs YUV, and its default there is BT.601 (5.1.1, 6.1; 7.1+ follows the link's
+  tag, "unknown" = BT.601), so through 2.10.1 every such output was BT.601 under a BT.709 tag: pure
+  red decoded (255,24,0), green (0,216,0), mean ΔRGB 8.8 / max 38.9, on 5.1.1, 6.1, 7.1.1 and 8.1.3.
+  `scale=out_color_matrix=bt709:out_range=tv,format=…` pins the conversion, so no build's default or
+  negotiation decides it: a source gets it as the encoder line's `-vf` (`bt709_matrix_filter()`,
+  folded like the BT.601 one, `format=yuv444p` so the tool's own scaling still sees full chroma), a
+  still a tool made RGBA (`overlay --image`, emoji, `waveform --image`'s composite) at the end of its
+  own chain (`rgb_chain_to_bt709()`, `yuva420p` for overlay). Converting the logo there, not letting
+  the overlay filter do it, matters for the video too: with an RGBA input `overlay=format=auto`
+  composites in RGB, so the whole main picture went to RGB and came back BT.601 (9.04 mean / 40.6
+  max on a BT.709 main with 5.1.1/6.1, 7.93 / 37.4 untagged on every build); with a `yuva420p` logo
+  it composites in YUV and the main's pixels are not touched. A palette PNG is expanded to RGB first:
+  swscale converts a palette with fixed BT.601 whatever `out_color_matrix` says (9.1 → 0.9 mean on
+  5.1.1/6.1). A JPEG probes as `yuvj420p`/`bt470bg` and is a BT.601 source like any other.
+  `grid.py` converts each cell by its own tags (`matrix_chain()`): it is an inspection sheet, but one
+  whose cells are compared with each other, and on 7.1+ `xstack` converted the cells to one
+  another's matrix, so a BT.601 cell first took the BT.709 cell with it. FFmpeg 7.1+ negotiates one
+  colourspace for all inputs of a mixing filter and converts the rest to it, taking "unknown" as
+  BT.601: with a converted logo the *untagged main* shifted (7.08 mean / 25 max on 7.1.1 and 8.1.3,
+  already 7.93 / 37.4 before this fix on 8.1), or the converted picture was converted back. So where
+  a converted picture meets an untagged one, the untagged one is labelled BT.709 (`setparams`, tags
+  only; `label_chain()`), which is what the output's tag says it is: no conversion is left to
+  negotiate, and on 5.1/6.1 the label changes nothing. It is applied only there (a still over the
+  video, a grid with a converted cell, and since 2.10.3 a `join`/`multicam`/`broll`/`overlay --video`
+  with a converted clip, where an untagged clip beside a BT.601 one was shifted on 7.1+: 7.08 mean /
+  25.0 max with the BT.601 clip first, 9.12 / 40.1 with it second, on 7.1.1 and 8.1.3), so a
+  one-input re-encode of an untagged source, and a grid or join of untagged/BT.709 clips, keep their
+  commands. Known on FFmpeg 7.0.x only (not in CI): its `colorspace` filter does not declare the
+  converted link, so a BT.601 clip *first* in `grid`/`join` still takes the others with it; the fix
+  would change #332's conversion filter for every tool, so it is left. Code: `_common/color.py`,
+  `_common/decision.py`. Tests:
+  `test_an_rgb_or_jpeg_source_is_converted_to_the_bt709_it_is_tagged_with`,
+  `test_a_still_composited_over_the_video_is_converted_to_bt709`,
+  `test_grid_converts_each_cell_by_its_own_tags`,
+  `test_mixing_tools_label_an_untagged_clip_beside_a_converted_one`,
+  `test_an_rgb_source_or_a_still_is_converted_to_the_bt709_it_is_tagged_with`,
+  `test_still_and_rgb_tools_plan_the_bt709_conversion`. These tests' "untagged" clips were tagged
+  bt709 when the fixtures were made by FFmpeg 7.1+ (the scale that drew them labels its output, and
+  x264 wrote that label): they are relabelled unknown before the encode since 2.10.3, so 7.1+ CI runs
+  the untagged case too.
+- **A colour the skill draws is drawn in the BT.709 its output is tagged with: on FFmpeg 7.1+ by
+  labelling an untagged picture, before 7.1 by drawing on an RGB copy and keeping every pixel the
+  drawing did not touch.** A pad, `tpad`, `rotate` fill, `drawtext` font/box/border colour or libass
+  colour is turned into YUV by the drawing filter itself (`ff_draw`): with BT.601 on 5.1-7.0 whatever
+  the picture is tagged, with the link's colourspace from 7.1 on, "unknown" read as BT.601; `drawbox`
+  uses BT.601 on every version, the `color`/`gradients` sources and an RGBA layer went through the
+  encoder line's BT.601 default. Through 2.10.2 every drawn colour was BT.601 under the BT.709 tag
+  (pure red (255,24,0), pure green (0,216,0): 8.80 mean / 38.9 max ΔRGB on 5.1.1, 6.1, 7.1.1 and
+  8.1.3; on 7.1+ only a BT.709-tagged or converted source's pads were right). `drawn_chain()` picks
+  the cheapest way that is exact on each build. 7.1+: the untagged picture is labelled BT.709
+  (`label_chain()`, tags only) and the filters follow the label; generated ASS says `YCbCr Matrix:
+  None`, because 8.x's `ass`/`subtitles` read an absent header as BT.601 whatever the link says
+  (FFmpeg's own SRT header already says None). Before 7.1 nothing makes `ff_draw` use another matrix,
+  so the drawing runs on an RGB copy (`rgb_island()`: in RGB a colour is written as it is, converted
+  back with BT.709), and maskedmerge takes the drawn copy only where it differs from the same round
+  trip without the colour: the RGB round trip is not lossless, so the untouched pixels come from the
+  YUV picture itself (bit-identical, `--quality 0`). The alternatives: a numeric pre-compensation of
+  the colour (the RGB that BT.601 maths turns into the BT.709 YUV) is out of gamut for saturated
+  colours -- pure red needs G = -27, and clamped it is as wrong as before (22.6 max), 15% of the RGB
+  cube cannot be reached; drawing everything in an RGB copy without the mask changes the whole
+  picture; the island on every build costs four scales per frame where 7.1+ needs none, and on 8.x
+  an RGB link with a non-None ASS header is drawn in limited range. Boxes, bars and backgrounds are
+  colour sources made in RGB and converted (`rgb_chain_to_bt709()`, as #333's logos): a `graphics.py`
+  template with a box of chroma draws all its boxes as overlaid colour layers, in their order and
+  under its text, which also ends drawbox's 4:2:0 quirk of blending chroma four times over (a 0.55
+  box was ~0.96 opaque in colour; the layer blends at the stated alpha; a box starting on an odd row
+  or column, which overlay cannot place in 4:2:0, gets a transparent first row/column, so it covers
+  the drawbox's pixels); `background.py`'s `color`/`gradients` and `waveform.py`'s plate and RGBA waves are
+  converted where they are made. Only a colour whose 8-bit YUV differs between the two matrices
+  (`is_neutral_color()`: not a grey, not graphics.py's near-black 101418) changes a command, so the
+  default black pads, white text and black/grey boxes plan what they did. Not converted: a GIF export
+  (untagged, and palettegen reads the pad back with the BT.601 it was drawn in), a prores or HDR line,
+  a caller's own `--ass` file (its colours and YCbCr header are the file's, as libass/FFmpeg read
+  them), and the PNG contact sheets of `look.py`/`scenes.py` (RGB outputs, not tagged video). Code:
+  `_common/color.py` (`is_neutral_color`, `rgb_island`), `_common/decision.py` (`drawn_chain`,
+  `pad_filters`), and each drawing tool. Tests: `test_a_pad_fill_or_background_lands_in_the_bt709_its_output_is_tagged_with`,
+  `test_drawn_text_and_boxes_land_in_the_bt709_their_output_is_tagged_with`,
+  `test_a_picture_that_only_passes_through_keeps_its_pixels`, `test_drawn_colours_are_drawn_in_bt709`.
 - **`--correct` converts through bt601 on both legs** (not bt709), because on every tested
   FFmpeg the 709 round trip through 8-bit 4:2:0 loses ~5 dB more than 601. Code:
   `color.py _rgb_stage()`. Test: `test_color_correct_identity_holds_on_a_bt709_tagged_source`.
@@ -1089,6 +1205,20 @@ not a new file format this tool would have to maintain.
   the run reads as "whisper.cpp found but failed" with the build's last output line and the next
   engine is tried (`engine_failed` when whisper.cpp was named). Reverse this if a measurement on other material shows `-mc 0` costing more than the
   loops it prevents. Test: `WhisperContextTests`.
+- **`FFMPEG_SKILL_ASR_MODEL` names a model for the engine that can load it; `--model` goes where it
+  is told.** The variable is this machine's default `--model` for `caption.py --transcribe` and
+  `silence.py --filler --transcribe` (#328). An explicit `--model` is one call's choice and goes to
+  whichever engine runs, as it did in 2.8.6. The variable applies to every call, including the
+  ones auto sends to Whisper for another language, so a Parakeet model there (an
+  `mlx-community/parakeet-*` repo or a `.gguf`) is offered to the Parakeet engines only and the
+  Whisper engines keep `base`; passed through as `--model` is, it would make every non-English
+  transcription on that machine fail on a model no Whisper engine loads. A Whisper name reaches the
+  Parakeet engines too, which pass over it for their own model, so it changes neither routing nor
+  Parakeet's model. The variable is not refused for a Parakeet name (`PARAKEET_MODEL` /
+  `PARAKEET_CPP_MODEL` remain the Parakeet engines' own setting, and `--model` beats them, so the
+  variable does too). `doctor` reports it no more than `FFMPEG_SKILL_ASR_ENGINE`: it prints no
+  environment values, and the result's `transcription.model` names the model that ran. Tests:
+  `ModelDefaultTests`, `test_the_machine_model_reaches_caption_and_silence`.
 
 ## Unreleased — cuts that say what they did
 
@@ -1439,3 +1569,23 @@ not a new file format this tool would have to maintain.
   measured frame timing rather than on the whole-file average; `keyframe_snapped` takes
   `start_snapped`'s meaning (the presented start moved) and `precision` takes
   `least_exact_precision`'s (the least exact segment).
+
+## Unreleased — a video layer in a project
+
+- **`overlays[]` refuses `video` beside another layer kind, and only that combination.** A video
+  layer is a fourth kind next to `logo`/`image`/`text`, as `overlay.py`'s `--logo`/`--image`/
+  `--text`/`--video` are one mutually exclusive choice. An entry with a logo, an image and text
+  together still draws the first of them (logo, then image, then text), as every release before
+  #326 did: refusing those too would refuse projects 2.8.6 rendered. Making every combination a
+  refusal is a separate change. Code: `render.check_overlay()`. Test:
+  `test_render_video_overlay_refusals_and_dry_run_plan`.
+- **`chromakey_similarity`/`chromakey_blend` without `chromakey` are refused in a project, though
+  `overlay.py` accepts the flags alone.** The tool ignores them silently there; a project key that
+  does nothing is what review 9 made a refusal (`OBJECT_KEYS`). A `chromakey*` key without
+  `video` is refused as `overlay.py --chromakey` without `--video` is. Code:
+  `render.check_overlay()`. Test: `test_render_video_overlay_refusals_and_dry_run_plan`.
+- **A missing layer file is refused before the first stage, under `--dry-run` too.** No earlier
+  stage writes an overlay video (it is the caller's file, like a clip source), so it is not a
+  pending intermediate and a plan for it is no plan. A missing `image` is unchanged: a dry run
+  still plans it and a real run fails in the overlays stage. Code: `render.main()`. Test:
+  `test_render_video_overlay_refusals_and_dry_run_plan`.

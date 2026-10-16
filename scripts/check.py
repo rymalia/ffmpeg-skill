@@ -163,13 +163,25 @@ def main() -> int:
         else:
             tags = (v.get("color_primaries"), v.get("color_transfer"))
             untagged = not tags[0] and not tags[1]
-            if v.get("bt2020_or_hdr") or tags == ("bt709", "bt709") or args.platform in ("podcast", "custom"):
+            # The matrix (color_space) is a tag too (#325): a player that honours it decodes with it,
+            # so a file whose only tag is a BT.601 matrix is BT.601, not "untagged".
+            matrix = v.get("color_space")
+            matrix_709 = matrix in (None, "bt709")
+            shown = (f"{matrix} matrix, primaries/transfer untagged" if untagged and matrix else
+                     f"{tags[0]}/{tags[1]}" + ("" if matrix in (None, tags[0]) else f", {matrix} matrix"))
+            if v.get("bt2020_or_hdr") or (tags == ("bt709", "bt709") and matrix_709) or args.platform in ("podcast", "custom"):
                 row("colour", "PASS", f"{tags[0]}/{tags[1]}" + (f" ({v.get('hdr_format')})" if v.get("bt2020_or_hdr") else ""), "bt709/bt709 tagged (or HDR)")
-            elif untagged and (v.get("bit_depth") or 8) == 8:
+            elif untagged and matrix_709 and (v.get("bit_depth") or 8) == 8:
                 # untagged 8-bit video is treated as BT.709 by every player and platform; nothing to fix
-                row("colour", "PASS", "untagged (players assume bt709)", "bt709/bt709 tagged (or HDR)")
+                row("colour", "PASS", shown + " (players assume bt709)" if matrix else "untagged (players assume bt709)", "bt709/bt709 tagged (or HDR)")
+            elif matrix in ("smpte170m", "bt470bg"):
+                # The pixels are BT.601-encoded. A re-encode here converts them to the BT.709 it tags
+                # (bt709_matrix_filter); --retag bt709 is a stream copy and only relabels the matrix.
+                row("colour", "WARN", shown, "bt709/bt709 tagged (or HDR)",
+                    "export.py (any re-encode here converts the BT.601 matrix to BT.709); color.py --retag bt709 only relabels it: right only if the pixels really are BT.709",
+                    reason="a player that honours the BT.601 tag and one that ignores it on HD video (decoding it as BT.709) show different colours")
             else:
-                row("colour", "WARN", f"{tags[0]}/{tags[1]}", "bt709/bt709 tagged (or HDR)", "color.py --retag bt709 when the picture really is 709; color.py --to-sdr when it is HDR")
+                row("colour", "WARN", shown, "bt709/bt709 tagged (or HDR)", "color.py --retag bt709 when the picture really is 709; color.py --to-sdr when it is HDR")
     elif args.platform not in ("podcast", "custom"):
         row("video", "FAIL", "none", "video stream", "")
 

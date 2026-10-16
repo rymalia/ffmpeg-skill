@@ -4,6 +4,7 @@
     python3 tests/test_picture.py       # this group alone
     python3 tests/test_all.py            # every group
 """
+import collections
 import contextlib
 import io
 import json
@@ -2037,7 +2038,8 @@ class PictureTests(MediaFixtures):
         the defect this release fixes -- MarginL=MarginR=MarginV=420 on a 1080-wide frame, a
         240 px text column -- so it pinned wrong bytes. The re-pin keeps --fit-size off meaning
         exactly what it meant (the size is never shrunk); only the side margins, and the wrap
-        budget that now agrees with them, differ."""
+        budget that now agrees with them, differ. 2.10.3 added the header line `YCbCr Matrix: None`
+        (the colours are RGB, drawn in the video's own matrix), and nothing else."""
         vert, cues = self._vertical(), self._fit_cues()
         ass = OUT / "cap_fit_off.ass"
         script("caption.py", vert, "--text", cues, "--platform", "tiktok", "--max-lines", "2",
@@ -2222,6 +2224,564 @@ class PictureTests(MediaFixtures):
                "--fit-size", "off", "--write-srt", OUT / "cap_mux_off.srt", "-o", b)
         self.assertEqual((OUT / "cap_mux_auto.srt").read_bytes(),
                          (OUT / "cap_mux_off.srt").read_bytes())
+
+
+class Bt601ConversionTests(unittest.TestCase):
+    """A BT.601-matrix source re-encoded here comes out tagged BT.709 *and* converted to it. Through
+    2.10.0 only the label changed: export.py --preset reels on a smpte170m clip wrote
+    bt709/bt709/bt709 over pixels 48.5 dB YUV PSNR from the source (untouched), so every player
+    that honours the tag showed shifted colours.
+
+    The pictures are compared in RGB, each decoded with the matrix it is tagged with (the source as
+    BT.601, the output as BT.709): a converted output matches its source there, a relabelled one
+    does not. Both sides' tags are pinned first, as in MediaFixtures._psnr, so no FFmpeg 7.1+
+    negotiation adds a conversion of its own."""
+
+    @classmethod
+    def setUpClass(cls):
+        encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], stdout=subprocess.PIPE, text=True).stdout
+        if "libx264" not in encoders:
+            raise unittest.SkipTest("this ffmpeg build has no libx264")
+        OUT.mkdir(parents=True, exist_ok=True)
+        cls.clips = {}
+        for name, params, size in (("full601", "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m", "320x240"),
+                                   ("bt470bg", "colormatrix=bt470bg", "320x240"),
+                                   ("untagged", None, "320x240"),
+                                   ("bt709", "colorprim=bt709:transfer=bt709:colormatrix=bt709", "320x240"),
+                                   ("reels601", "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m", "1080x1920")):
+            path = OUT / f"matrix_{name}.mp4"
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc2=s={size}:r=30:d={1 if size == '1080x1920' else 2}",
+               "-f", "lavfi", "-i", "sine=sample_rate=48000:d=2", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p",
+               *(["-x264-params", params] if params else []), "-c:a", "aac", "-shortest", path)
+            cls.clips[name] = path
+
+    @staticmethod
+    def _rgb_psnr(a, a_matrix, b, b_matrix, seek=None):
+        """PSNR in RGB of b (decoded with b_matrix) against a (decoded with a_matrix), over b's frames;
+        `seek` = (start, length) of a that b holds."""
+        def leg(i, m):
+            tag = {"bt601": "smpte170m", "bt709": "bt709"}[m]
+            return (f"[{i}:v]setpts=N/FRAME_RATE/TB,setparams=colorspace={tag}:color_primaries=bt709:color_trc=bt709:range=tv,"
+                    f"scale=in_color_matrix={m}:in_range=tv:out_range=pc,format=gbrp[{'ab'[i]}]")
+        cut = ["-ss", str(seek[0]), "-t", str(seek[1])] if seek else []
+        proc = subprocess.run(["ffmpeg", "-hide_banner", *cut, "-i", str(a), "-i", str(b), "-lavfi",
+                               f"{leg(0, a_matrix)};{leg(1, b_matrix)};[a][b]psnr", "-f", "null", "-"],
+                              stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        m = re.search(r"average:(inf|[\d.]+)", proc.stderr)
+        assert m, proc.stderr[-400:]
+        return float("inf") if m.group(1) == "inf" else float(m.group(1))
+
+    def _runs(self, name):
+        """(tool, output, seek, result document) for fit.py and cut.py --accurate on clip `name`."""
+        src = self.clips[name]
+        for tool, args, seek in (("fit.py", ["--width", "320", "--height", "240", "--quality", "8"], None),
+                                 ("cut.py", ["--start", "0.5", "--end", "1.5", "--accurate", "--quality", "8"], (0.5, 1))):
+            out = OUT / f"matrix_{name}_{tool[:-3]}.mp4"
+            doc = json.loads(script(tool, src, *args, "--fast", "--json", "-o", out).stdout)
+            yield tool, out, seek, doc
+
+    def _assert_bt709_tags(self, out):
+        v = probe(str(out))["video"]
+        self.assertEqual((v["color_space"], v["color_primaries"], v["color_transfer"]), ("bt709", "bt709", "bt709"))
+
+    def test_a_bt601_source_is_converted_to_the_bt709_it_is_tagged_with(self):
+        # the issue's reproduction: export.py --preset reels on a 1080x1920 smpte170m clip
+        src = self.clips["reels601"]
+        out = OUT / "matrix_reels601_export.mp4"
+        doc = json.loads(script("export.py", src, "--preset", "reels", "--fast", "--crf", "8", "--json", "-o", out).stdout)
+        self.assertIn("colorspace=ispace=smpte170m", " ".join(doc["commands"]))
+        cases = [("export.py", out, None, src)] + [(t, o, s, self.clips[n]) for n in ("full601", "bt470bg") for t, o, s, _ in self._runs(n)]
+        for tool, out, seek, src in cases:
+            with self.subTest(tool=tool, source=src.name):
+                self._assert_bt709_tags(out)
+                converted = self._rgb_psnr(src, "bt601", out, "bt709", seek)
+                relabelled = self._rgb_psnr(src, "bt709", out, "bt709", seek)
+                # measured 42.2 dB converted (5.1.1, 6.1, a 7.1 snapshot); the 2.10.0 relabel was 24.8 dB
+                # here and 52 dB on the second comparison, which a converted picture can't reach
+                self.assertGreater(converted, 38.0, f"{tool}: the BT.709 output does not show the BT.601 source's colours")
+                self.assertLess(relabelled, 32.0, f"{tool}: the pixels were relabelled, not converted")
+
+    def test_an_untagged_or_bt709_source_is_not_converted(self):
+        """Untagged SDR is taken as BT.709 by players, and converting it is the 7.1 auto-conversion
+        bt709_tag_args() exists to avoid: no conversion is planned and the pixels stay the source's."""
+        for name in ("untagged", "bt709"):
+            for tool, out, seek, doc in self._runs(name):
+                with self.subTest(tool=tool, source=name):
+                    self.assertNotIn("colorspace=", " ".join(doc["commands"]))
+                    self._assert_bt709_tags(out)
+                    self.assertGreater(self._rgb_psnr(self.clips[name], "bt709", out, "bt709", seek), 45.0, tool)
+
+
+class RgbAndStillConversionTests(unittest.TestCase):
+    """2.10.1 converted a BT.601-tagged video source to the BT.709 its re-encode is tagged with; an
+    RGB picture (a PNG still or logo, an emoji PNG, a PNG sequence, a qtrle clip), a JPEG still and
+    grid.py's cells were still made YUV by FFmpeg's own default, BT.601, and tagged BT.709: pure
+    red decoded as (255,24,0) and pure green as (0,216,0) on 5.1.1, 6.1, 7.1 and 8.1 (mean
+    ΔRGB 8.8, max 38.9 over the three patches below).
+
+    Each output is decoded here, in Python, with the matrix and range its own tags name, and the
+    solid patches are compared with the colours the source holds (the PNG's RGB; the JPEG decoded
+    as BT.601 full range, what JPEG is). Converted, every patch is within ~1.6 of its colour."""
+
+    COLOURS = [(255, 0, 0), (0, 255, 0), (40, 120, 200)]
+    BAR = 64  # the still is three BAR x BAR bars side by side
+
+    @classmethod
+    def setUpClass(cls):
+        encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], stdout=subprocess.PIPE, text=True).stdout
+        if "libx264" not in encoders:
+            raise unittest.SkipTest("this ffmpeg build has no libx264")
+        cls.dir = OUT / "rgbstill"
+        cls.dir.mkdir(parents=True, exist_ok=True)
+        d, bar = cls.dir, cls.BAR
+        row = b"".join(bytes(cls.COLOURS[x // bar]) for x in range(3 * bar))
+        (d / "bars.ppm").write_bytes(b"P6\n%d %d\n255\n" % (3 * bar, bar) + row * bar)
+        q = ("ffmpeg", "-y", "-hide_banner", "-loglevel", "error")
+        sh(*q, "-i", d / "bars.ppm", "-pix_fmt", "rgb24", d / "bars.png")
+        sh(*q, "-i", d / "bars.ppm", "-pix_fmt", "pal8", d / "bars_pal8.png")
+        sh(*q, "-i", d / "bars.ppm", "-q:v", "1", "-pix_fmt", "yuvj420p", d / "bars.jpg")
+        (d / "seq").mkdir(exist_ok=True)
+        for i in range(1, 11):
+            shutil.copyfile(d / "bars.png", d / "seq" / f"f_{i:04d}.png")
+        cls.emoji = d / "emoji"
+        cls.emoji.mkdir(exist_ok=True)
+        # a solid red 'emoji' (the asset is named by code point, like _emoji_assets())
+        (d / "red.ppm").write_bytes(b"P6\n72 72\n255\n" + bytes((255, 0, 0)) * (72 * 72))
+        sh(*q, "-i", d / "red.ppm", "-pix_fmt", "rgba", cls.emoji / "1f389.png")
+        x264 = ("-c:v", "libx264", "-preset", "ultrafast", "-crf", "1", "-pix_fmt", "yuv420p")
+        tags = {"bt709": ("-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709"), "untagged": (),
+                "smpte170m": ("-x264-params", "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m")}
+        loop = (*q, "-loop", "1", "-framerate", "25", "-i", d / "bars.png", "-t", "1")
+        # the bars as a base to composite on, 768x256 with audio, BT.709-tagged and untagged (encoded
+        # with BT.709, what players take untagged video as): a shifted main picture shows as well
+        # (an untagged clip's frames are relabelled unknown: from 7.1 the scale's own BT.709 output
+        # would otherwise reach x264's VUI, and the "untagged" clip came out tagged bt709)
+        untag = {"untagged": ",setparams=colorspace=unknown"}
+        for name, tag in (("base709", "bt709"), ("baseun", "untagged")):
+            sh(*loop, "-f", "lavfi", "-i", "sine=d=1", "-vf",
+               "scale=768:256:flags=neighbor:out_color_matrix=bt709:out_range=tv,format=yuv420p" + untag.get(tag, ""),
+               *x264, *tags[tag], "-c:a", "aac", "-shortest", d / f"{name}.mp4")
+        # the bars as video: an RGB qtrle clip, and BT.601- / BT.709-tagged and untagged clips encoded with their own matrix
+        sh(*loop, "-vf", "scale=384:128:flags=neighbor", "-c:v", "qtrle", "-pix_fmt", "rgb24", d / "qtrle.mov")
+        for name, m, tag in (("v601", "bt601", "smpte170m"), ("v709", "bt709", "bt709"), ("vun", "bt709", "untagged")):
+            sh(*loop, "-vf", f"scale=384:128:flags=neighbor:out_color_matrix={m}:out_range=tv,format=yuv420p" + untag.get(tag, ""),
+               *x264, *tags[tag], d / f"{name}.mp4")
+        cls.jpeg = cls._patches(d / "bars.jpg", cls._bars(0, 0), t=0)  # what the JPEG holds, decoded as JPEG
+
+    @classmethod
+    def _bars(cls, x, y, scale=1, inset=12):
+        b = cls.BAR * scale
+        return [(x + k * b + inset, y + inset, x + (k + 1) * b - inset, y + b - inset) for k in range(3)]
+
+    @staticmethod
+    def _patches(path, rects, t=0.5):
+        """Mean RGB of each rect of the frame at `t`, decoded with the matrix and range the stream is
+        tagged with (BT.601 for a smpte170m/bt470bg tag or an untagged JPEG, else BT.709)."""
+        s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                       "stream=width,height,pix_fmt,color_space,color_range", "-of", "json", str(path)],
+                                      stdout=subprocess.PIPE, text=True, check=True).stdout)["streams"][0]
+        w, h, pf, cs = s["width"], s["height"], s["pix_fmt"], s.get("color_space") or "unknown"
+        assert pf in ("yuv420p", "yuvj420p"), pf
+        raw = subprocess.run(["ffmpeg", "-v", "error", *(["-ss", str(t)] if t else []), "-i", str(path), "-frames:v", "1",
+                              "-f", "rawvideo", "-pix_fmt", pf, "-"], stdout=subprocess.PIPE, check=True).stdout
+        bt601 = cs in ("smpte170m", "bt470bg") or (cs == "unknown" and pf == "yuvj420p")
+        kr, kb = (0.299, 0.114) if bt601 else (0.2126, 0.0722)
+        full = pf == "yuvj420p" or s.get("color_range") == "pc"
+        cw, ch = w // 2, h // 2
+        out = []
+        for x0, y0, x1, y1 in rects:
+            mean = lambda off, stride, xs, ys: sum(raw[off + yy * stride + xx] for yy in ys for xx in xs) / (len(xs) * len(ys))
+            y_ = mean(0, w, range(x0, x1), range(y0, y1))
+            u = mean(w * h, cw, range(x0 // 2, x1 // 2), range(y0 // 2, y1 // 2)) - 128
+            v = mean(w * h + cw * ch, cw, range(x0 // 2, x1 // 2), range(y0 // 2, y1 // 2)) - 128
+            ys, cs_ = (1.0, 1.0) if full else (255 / 219, 255 / 224)
+            Y = (y_ - (0 if full else 16)) * ys
+            r, b = Y + 2 * (1 - kr) * v * cs_, Y + 2 * (1 - kb) * u * cs_
+            g = (Y - kr * r - kb * b) / (1 - kr - kb)
+            out.append(tuple(max(0.0, min(255.0, c)) for c in (r, g, b)))
+        return out
+
+    def _assert_colours(self, out, rects, want, t=0.5):
+        v = probe(str(out))["video"]
+        self.assertEqual(v["color_space"], "bt709", f"{out.name}: the output is not tagged BT.709")
+        got = self._patches(out, rects, t)
+        diffs = [abs(a - b) for g, w in zip(got, want) for a, b in zip(g, w)]
+        # measured after the fix: mean <= 0.65, max <= 1.6 (pal8: 0.94 / 2.6, the PNG is dithered);
+        # before it: mean >= 8.0, max >= 24 (BT.601 pixels under a BT.709 tag)
+        self.assertLess(sum(diffs) / len(diffs), 3.0, f"{out.name}: {[tuple(round(c) for c in g) for g in got]} != {want}")
+        self.assertLess(max(diffs), 8.0, f"{out.name}: {[tuple(round(c) for c in g) for g in got]} != {want}")
+
+    def test_an_rgb_or_jpeg_source_is_converted_to_the_bt709_it_is_tagged_with(self):
+        """Follow-up 1 of #332: RGB sources and JPEG stills, through every tool that takes one."""
+        d = self.dir
+        runs = [
+            ("insert.py", [d / "bars.png", "--duration", "1", "--width", "384", "--height", "128"], self.COLOURS, 0.5),
+            ("insert.py", [d / "bars_pal8.png", "--duration", "1", "--width", "384", "--height", "128"], self.COLOURS, 0.5),
+            ("insert.py", [d / "bars.jpg", "--duration", "1", "--width", "384", "--height", "128"], self.jpeg, 0.5),
+            ("sequence.py", ["--dir", d / "seq", "--pattern", "f_%04d.png", "--start-number", "1", "--fps", "10",
+                             "--width", "384", "--height", "128"], self.COLOURS, 0.3),
+            ("fit.py", [d / "qtrle.mov", "--width", "384", "--height", "128"], self.COLOURS, 0.5),
+            ("export.py", [d / "qtrle.mov", "--preset", "youtube", "--no-scale"], self.COLOURS, 0.5),
+        ]
+        for n, (tool, args, want, t) in enumerate(runs):
+            with self.subTest(tool=tool, source=Path(str(args[0])).name):
+                out = d / f"rgb_{n}_{tool[:-3]}.mp4"
+                script(tool, *args, "--fast", "-o", out)
+                self._assert_colours(out, self._bars(0, 0, 2), want, t)
+
+    def test_a_still_composited_over_the_video_is_converted_to_bt709(self):
+        """Follow-up 2 of #332: overlay.py --image (render.py's image/logo layers), waveform.py --image
+        (the audiogram template) and graphics/caption emoji PNGs. 7.1+ already converted an RGBA layer
+        by the main input's tag, so over a BT.709-tagged base only 5.1/6.1 were wrong; over an
+        untagged one 7.1+ negotiates one colourspace for both pictures and took "unknown" as BT.601.
+        The main's own bars are checked too: overlay's format=auto composited an RGBA logo in RGB, so
+        the WHOLE picture went through RGB and came back BT.601 (9.04 mean / 40.6 max on a BT.709 main,
+        7.93 / 37.4 on an untagged one, 5.1.1 and 6.1; the untagged one on 7.1.1 and 8.1.3 too)."""
+        d = self.dir
+        main = [(k * 256 + 20, 20, k * 256 + 236, 100) for k in range(3)]  # the base's bars, clear of the logo
+        for img, base, want in (("bars.png", "baseun", self.COLOURS), ("bars.png", "base709", self.COLOURS),
+                                ("bars.jpg", "base709", self.jpeg), ("bars.jpg", "baseun", self.jpeg)):
+            out = d / f"ov_{img.replace('.', '_')}_{base}.mp4"
+            script("overlay.py", d / f"{base}.mp4", "--image", d / img, "--position", "bottom-right", "--margin", "0", "--fast", "-o", out)
+            with self.subTest(tool="overlay.py", image=img, base=base, part="the image"):
+                self._assert_colours(out, self._bars(576, 192), want)
+            with self.subTest(tool="overlay.py", image=img, base=base, part="the main picture"):
+                self._assert_colours(out, main, self.COLOURS)
+        with self.subTest(tool="waveform.py"):
+            out = d / "wave_png.mp4"
+            script("waveform.py", d / "baseun.mp4", "--image", d / "bars.png", "--width", "384", "--height", "128",
+                   "--vis-height", "0.1", "--opacity", "0", "--fast", "-o", out)
+            self._assert_colours(out, self._bars(0, 0, 2), self.COLOURS)
+        filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], stdout=subprocess.PIPE, text=True).stdout
+        with self.subTest(tool="graphics.py --emoji png"):
+            if not re.search(r"^\s*\S+\s+ass\s", filters, re.M):
+                self.skipTest("this ffmpeg build has no ass filter")
+            out = d / "emoji_png.mp4"
+            doc = json.loads(script("graphics.py", d / "baseun.mp4", "--template", "sticker", "--text", "\U0001F389",
+                                    "--position", "bottom-right", "--emoji", "png", "--emoji-assets", self.emoji,
+                                    "--emoji-scale", "2", "--fast", "--json", "-o", out).stdout)
+            m = re.search(r"scale=(\d+):\d+.*overlay=x=(\d+):y=(\d+)", " ".join(doc["commands"]))
+            box, x, y = (int(g) for g in m.groups())
+            self._assert_colours(out, main, self.COLOURS)
+            self._assert_colours(out, [(x + 8, y + 8, x + box - 8, y + box - 8)], [(255, 0, 0)])
+
+    def test_grid_converts_each_cell_by_its_own_tags(self):
+        """Follow-up 3 of #332: grid.py relabelled every cell BT.709 (5.1.1, 6.1); on 7.1+ xstack
+        negotiated one colourspace for every cell and converted the others to it, so a BT.601 cell
+        took a BT.709 one with it, and an untagged cell beside a converted one was converted as
+        BT.601. Every order, every cell."""
+        d = self.dir
+        for order in (("v601", "v709"), ("v709", "v601"), ("v601", "vun"), ("vun", "v601")):
+            out = d / f"grid_{order[0]}_{order[1]}.mp4"
+            script("grid.py", *[d / f"{o}.mp4" for o in order], "--cols", "2", "--rows", "1", "--cell-width", "384",
+                   "--cell-height", "128", "--label", "none", "--fast", "-o", out)
+            for c, name in enumerate(order):
+                with self.subTest(order=order, cell=name):
+                    self._assert_colours(out, self._bars(384 * c, 0, 2), self.COLOURS)
+
+    def test_mixing_tools_label_an_untagged_clip_beside_a_converted_one(self):
+        """#332 converted a BT.601 clip in its own chain in join, broll, multicam and overlay --video,
+        but left an untagged clip beside it untagged: FFmpeg 7.1+ negotiates one colourspace for
+        concat/overlay and converts the rest, taking "unknown" as BT.601, so one of the two pictures
+        shifted (7.08 mean / 25.0 max with the BT.601 clip first, 9.12 / 40.1 with it second, on
+        7.1.1 and 8.1.3; 5.1.1 and 6.1 were already right). The untagged clip now gets its BT.709
+        label, tags only, as grid.py's cells did in #333. Every order, every picture."""
+        d = self.dir
+        clips = {}
+        for name, vf, tag in (("un", "out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams=colorspace=unknown", ()),
+                              ("601", "out_color_matrix=bt601:out_range=tv,format=yuv420p",
+                               ("-x264-params", "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m"))):
+            clips[name] = d / f"mix_{name}.mp4"
+            if not clips[name].exists():  # 2 s of the bars, the same noise under both for multicam's alignment
+                sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-framerate", "25", "-i", d / "bars.png",
+                   "-f", "lavfi", "-i", "anoisesrc=d=2:seed=7:amplitude=0.3", "-t", "2", "-vf",
+                   f"scale=384:128:flags=neighbor:{vf}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "1",
+                   "-pix_fmt", "yuv420p", *tag, "-c:a", "aac", "-shortest", clips[name])
+        big = d / "baseun.mp4"  # 768x256 untagged bars: the main picture for overlay --video
+        for clip in (clips["un"], big):  # really untagged on 7.1+ too
+            self.assertIn(probe(str(clip))["video"].get("color_space"), (None, "unknown", "unspecified"), clip.name)
+        pip = [(384 + 12 + k * 128, 128 + 12, 384 + (k + 1) * 128 - 12, 256 - 12) for k in range(3)]
+        main = [(k * 256 + 20, 20, k * 256 + 236, 100) for k in range(3)]
+        for a, b in (("un", "601"), ("601", "un")):
+            out = d / f"mix_join_{a}_{b}.mp4"
+            script("join.py", clips[a], clips[b], "--transition", "none", "--fast", "-o", out)
+            for t, name in ((0.5, a), (2.5, b)):
+                with self.subTest(tool="join.py", order=(a, b), clip=name):
+                    self._assert_colours(out, self._bars(0, 0, 2), self.COLOURS, t)
+            out = d / f"mix_broll_{a}_{b}.mp4"
+            script("broll.py", clips[a], "--insert", clips[b], "--at", "0.5", "--duration", "1", "--fast", "-o", out)
+            for t, name in ((0.2, a), (1.0, b)):
+                with self.subTest(tool="broll.py", order=(a, b), clip=name):
+                    self._assert_colours(out, self._bars(0, 0, 2), self.COLOURS, t)
+            out = d / f"mix_multicam_{a}_{b}.mp4"
+            script("multicam.py", clips[a], clips[b], "--switch", "0-1:0,1-2:1", "--fast", "-o", out)
+            for t, name in ((0.5, a), (1.5, b)):
+                with self.subTest(tool="multicam.py", order=(a, b), clip=name):
+                    self._assert_colours(out, self._bars(0, 0, 2), self.COLOURS, t)
+        for main_clip, pip_clip in ((big, clips["601"]), (d / "base601big.mp4", clips["un"])):
+            if not main_clip.exists():
+                sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-framerate", "25", "-i", d / "bars.png",
+                   "-f", "lavfi", "-i", "sine=d=1", "-t", "1", "-vf",
+                   "scale=768:256:flags=neighbor:out_color_matrix=bt601:out_range=tv,format=yuv420p", "-c:v", "libx264",
+                   "-preset", "ultrafast", "-crf", "1", "-pix_fmt", "yuv420p", "-x264-params",
+                   "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m", "-c:a", "aac", "-shortest", main_clip)
+            out = d / f"mix_overlay_{main_clip.stem}.mp4"
+            script("overlay.py", main_clip, "--video", pip_clip, "--position", "bottom-right", "--margin", "0", "--fast", "-o", out)
+            for part, rects in (("main", main), ("pip", pip)):
+                with self.subTest(tool="overlay.py --video", main=main_clip.name, part=part):
+                    self._assert_colours(out, rects, self.COLOURS)
+
+
+class DrawnColourTests(unittest.TestCase):
+    """A colour the skill draws -- a pad, a background, a box, text, a caption, a waveform -- from a
+    hex or named value. FFmpeg's drawing filters turn it into YUV with a matrix of their own: BT.601
+    always up to 7.0 (and drawbox on every version), the link's colourspace from 7.1 on, "unknown"
+    read as BT.601; the `color` source and an RGBA layer went through the encoder line's own BT.601
+    conversion. So through 2.10.2 the colour landed as BT.601 YUV under the output's BT.709 tag on
+    5.1.1, 6.1, 7.1.1 and 8.1.3: pure red decoded as (255,24,0), pure green as (0,216,0), mean
+    ΔRGB 8.8 / max 38.9 (7.1+ was right only for a BT.709-tagged or converted source's pad).
+
+    Each output is decoded with the matrix its own tags name, and the drawn region is compared with
+    the true colour (a translucent element: blended with the grey under it). Fixed, every one is
+    within ~1.6. A picture that only passes through keeps its pixels (the last test)."""
+
+    RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (40, 120, 200)
+    GREY = (128, 128, 128)
+
+    @classmethod
+    def setUpClass(cls):
+        encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], stdout=subprocess.PIPE, text=True).stdout
+        if "libx264" not in encoders:
+            raise unittest.SkipTest("this ffmpeg build has no libx264")
+        cls.filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], stdout=subprocess.PIPE, text=True).stdout
+        cls.dir = OUT / "drawn"
+        cls.dir.mkdir(parents=True, exist_ok=True)
+        d = cls.dir
+        q = ("ffmpeg", "-y", "-hide_banner", "-loglevel", "error")
+        x264 = ("-c:v", "libx264", "-preset", "ultrafast", "-crf", "1", "-pix_fmt", "yuv420p")
+        bt709 = ("-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709")
+        grey = lambda size, dur: ("-f", "lavfi", "-i", f"color=c=0x808080:s={size}:r=25:d={dur}")  # noqa: E731
+        sine = lambda dur: ("-f", "lavfi", "-i", f"sine=d={dur}")  # noqa: E731
+        for name, args in (("grey", (*grey("640x360", 2), *sine(2), *x264, "-c:a", "aac", "-shortest")),
+                           ("grey709", (*grey("640x360", 2), *sine(2), *x264, *bt709, "-c:a", "aac", "-shortest")),
+                           ("silent", (*grey("640x360", 2), *x264)),  # pad.py: no audio track to delay
+                           ("tall", (*grey("360x640", 2), *sine(2), *x264, "-c:a", "aac", "-shortest")),
+                           ("big", (*grey("1280x720", 3), *sine(3), *x264, "-c:a", "aac", "-shortest"))):
+            if not (d / f"{name}.mp4").exists():
+                sh(*q, *args, d / f"{name}.mp4")
+        if not (d / "loud.wav").exists():
+            sh(*q, "-f", "lavfi", "-i", "sine=f=3:d=2:sample_rate=48000,volume=4", d / "loud.wav")
+        if not (d / "subs.srt").exists():
+            (d / "subs.srt").write_text("1\n00:00:00,000 --> 00:00:05,000\nHHH\n", encoding="utf-8")
+
+    def _has(self, name):
+        return re.search(rf"^\s*\S+\s+{name}\s", self.filters, re.M)
+
+    @staticmethod
+    def _blend(c, a):
+        return tuple(a * x + (1 - a) * 128 for x in c)
+
+    def _check(self, out, got, want):
+        v = probe(str(out))["video"]
+        self.assertEqual(v["color_space"], "bt709", f"{out.name}: the output is not tagged BT.709")
+        diffs = [abs(a - b) for g, w in zip(got, want) for a, b in zip(g, w)]
+        # measured fixed: mean <= 0.6, max <= 1.6 (5.1.1, 6.1, 7.1.1, 8.1.3); through 2.10.2 the
+        # colour was BT.601 under that tag: mean >= 6.6, max >= 24 for every case below
+        shown = [tuple(round(c) for c in g) for g in got]
+        self.assertLess(sum(diffs) / len(diffs), 3.0, f"{out.name}: {shown} != {want}")
+        self.assertLess(max(diffs), 8.0, f"{out.name}: {shown} != {want}")
+
+    def _patches(self, out, rects, t=0.5):
+        return RgbAndStillConversionTests._patches(out, rects, t)
+
+    def _mode(self, out, rect, t=0.5, ignore=(128, 128, 128)):
+        """The most common colour of the flat 2x2 blocks in `rect` that are not `ignore`: the drawn
+        text's or box's own colour, without knowing where the glyphs are."""
+        s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                       "stream=width,height,color_range", "-of", "json", str(out)],
+                                      stdout=subprocess.PIPE, text=True, check=True).stdout)["streams"][0]
+        w, h = s["width"], s["height"]
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(out), "-frames:v", "1", "-f", "rawvideo",
+                              "-pix_fmt", "yuv420p", "-"], stdout=subprocess.PIPE, check=True).stdout
+        cw, ch = w // 2, h // 2
+        bins = {}
+        x0, y0, x1, y1 = rect
+        for by in range(y0 // 2, y1 // 2):
+            for bx in range(x0 // 2, x1 // 2):
+                ys = [raw[(2 * by + dy) * w + 2 * bx + dx] for dy in (0, 1) for dx in (0, 1)]
+                if max(ys) - min(ys) > 3:
+                    continue  # an edge
+                yy = (sum(ys) / 4 - 16) * 255 / 219
+                u = (raw[w * h + by * cw + bx] - 128) * 255 / 224
+                v = (raw[w * h + cw * ch + by * cw + bx] - 128) * 255 / 224
+                r, b = yy + 1.5748 * v, yy + 1.8556 * u
+                rgb = tuple(max(0.0, min(255.0, c)) for c in (r, (yy - 0.2126 * r - 0.0722 * b) / 0.7152, b))
+                if max(abs(a - c) for a, c in zip(rgb, ignore)) > 10:
+                    bins.setdefault(tuple(int(c) // 6 for c in rgb), []).append(rgb)
+        self.assertTrue(bins, f"{out.name}: nothing drawn in {rect}")
+        best = max(bins.values(), key=len)
+        return tuple(sum(c[i] for c in best) / len(best) for i in range(3))
+
+    def test_a_pad_fill_or_background_lands_in_the_bt709_its_output_is_tagged_with(self):
+        """Solid fills: background.py (the `color` source and a `gradients` one), the pad of fit.py,
+        export.py, join.py, broll.py and grid.py (its cells and its gaps), pad.py's tpad,
+        straighten.py's rotate fill and waveform.py's background, on an untagged and a BT.709-tagged
+        source. The picture beside the pad stays grey."""
+        d = self.dir
+        runs = [  # (tool, args, [(rect, colour)], t)
+            ("background.py", ["--duration", "1", "--width", "128", "--height", "64", "--color", "0xFF0000"],
+             [((16, 16, 112, 48), self.RED)], 0.5),
+            ("background.py", ["--duration", "1", "--width", "128", "--height", "64", "--color", "#2878C8"],
+             [((16, 16, 112, 48), self.BLUE)], 0.5),
+            ("fit.py", [d / "grey.mp4", "--width", "640", "--height", "640", "--fit", "pad", "--pad-color", "0x00FF00"],
+             [((100, 20, 540, 120), self.GREEN), ((100, 200, 540, 440), self.GREY)], 0.5),
+            ("fit.py", [d / "grey709.mp4", "--width", "640", "--height", "640", "--fit", "pad", "--pad-color", "red"],
+             [((100, 20, 540, 120), self.RED), ((100, 200, 540, 440), self.GREY)], 0.5),
+            ("export.py", [d / "grey.mp4", "--preset", "reels", "--pad-color", "0x2878C8"],
+             [((100, 40, 980, 400), self.BLUE)], 0.5),
+            ("pad.py", [d / "silent.mp4", "--start", "1", "--color", "0xFF0000"],
+             [((100, 100, 540, 260), self.RED)], 0.5),
+            ("join.py", [d / "grey.mp4", d / "tall.mp4", "--transition", "none", "--pad-color", "0x00FF00"],
+             [((20, 100, 200, 260), self.GREEN)], 3.0),
+            ("broll.py", [d / "grey.mp4", "--insert", d / "tall.mp4", "--at", "0.5", "--duration", "1",
+                          "--pad-color", "0x2878C8"], [((20, 100, 200, 260), self.BLUE)], 1.0),
+            ("grid.py", [d / "grey.mp4", d / "tall.mp4", "--cols", "2", "--rows", "1", "--cell-width", "320",
+                         "--cell-height", "180", "--gap", "16", "--background", "0xFF0000", "--label", "none"],
+             [((340, 20, 440, 160), self.RED), ((322, 20, 334, 160), self.RED), ((20, 20, 300, 160), self.GREY)], 0.5),
+            ("straighten.py", [d / "grey.mp4", "--degrees", "10", "--fit", "pad", "--fill-color", "0x00FF00"],
+             [((2, 2, 18, 18), self.GREEN)], 0.5),
+            ("waveform.py", [d / "loud.wav", "--width", "320", "--height", "180", "--background", "0x2878C8",
+                             "--color", "white"], [((2, 2, 30, 30), self.BLUE)], 0.5),
+        ]
+        for n, (tool, args, want, t) in enumerate(runs):
+            with self.subTest(tool=tool, args=[Path(str(a)).name for a in args if not str(a).startswith("--")][:3]):
+                out = d / f"fill_{n}_{tool[:-3]}.mp4"
+                script(tool, *args, "--fast", "-o", out)
+                self._check(out, self._patches(out, [r for r, _c in want], t), [c for _r, c in want])
+        with self.subTest(tool="background.py --gradient"):
+            out = d / "fill_gradient.mp4"
+            script("background.py", "--duration", "1", "--width", "256", "--height", "64", "--gradient",
+                   "0xFF0000:0x00FF00", "--fast", "-o", out)
+            rects = [(4, 16, 20, 48), (120, 16, 136, 48), (236, 16, 252, 48)]
+            # the truth: the same gradients source rendered as RGB by this very build
+            src = "gradients=size=256x64:rate=30:c0=0xFF0000:c1=0x00FF00:x0=0:y0=0:x1=256:y1=0:seed=0:speed=1e-05"
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", src, "-frames:v", "1", "-f", "rawvideo",
+                                  "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, check=True).stdout
+            want = []
+            for x0, y0, x1, y1 in rects:
+                px = [raw[(y * 256 + x) * 3:(y * 256 + x) * 3 + 3] for y in range(y0, y1) for x in range(x0, x1)]
+                want.append(tuple(sum(p[i] for p in px) / len(px) for i in range(3)))
+            self._check(out, self._patches(out, rects), want)
+
+    def test_drawn_text_and_boxes_land_in_the_bt709_their_output_is_tagged_with(self):
+        """Text and boxes: overlay.py --text (font colour, box colour), graphics.py's templates (the
+        lower-third bar and accent, the title's box and accent line, the hook's band and bar, the
+        progress bar and its strip, a chapter chip, a countdown digit; brand primary and background
+        set to the colour), the libass route, caption.py's burn (--color) and waveform.py's waves."""
+        if not self._has("drawtext"):
+            self.skipTest("this ffmpeg build has no drawtext filter")
+        d = self.dir
+        cases = []  # (label, out, [measured colours], [true colours])
+        out = d / "text_box.mp4"
+        script("overlay.py", d / "grey.mp4", "--text", ".", "--box", "--box-color", "0xFF0000", "--font-size", "20",
+               "--position", "top-left", "--fast", "-o", out)
+        cases.append(("overlay.py --box-color", out, [self._mode(out, (0, 0, 320, 180))], [self.RED]))
+        out = d / "text_font.mp4"
+        script("overlay.py", d / "grey.mp4", "--text", "HHH", "--font-color", "0x00FF00", "--font-size", "160",
+               "--border", "0", "--position", "center", "--fast", "-o", out)
+        cases.append(("overlay.py --font-color", out, [self._mode(out, (0, 0, 640, 360))], [self.GREEN]))
+        for tpl, colour, extra in (("lower-third", self.BLUE, ["--name", "N"]), ("title", self.RED, ["--title", "T"]),
+                                   ("hook", self.GREEN, ["--title", "T", "--duration", "2"]), ("progress", self.RED, []),
+                                   ("chapter", self.BLUE, ["--title", "CHAPTER"]), ("countdown", self.GREEN, ["--from", "1"])):
+            hx = "%02X%02X%02X" % colour
+            brand = d / f"brand_{hx}.json"
+            brand.write_text(json.dumps({"colors": {"primary": hx, "background": hx, "text": "FFFFFF"}}), encoding="utf-8")
+            out = d / f"gfx_{tpl}.mp4"
+            doc = json.loads(script("graphics.py", d / "big.mp4", "--template", tpl, "--brand", brand, *extra, "--start", "0",
+                                    "--end", "3", "--fast", "--json", "-o", out).stdout)
+            if tpl == "lower-third":
+                m = re.search(r"s=(\d+)x(\d+).*?s=(\d+)x\2.*?,(\d+)\)\)\S*?:y=(\d+)", " ".join(doc["commands"]))
+                _bw, bh, aw, x, y = (int(g) for g in m.groups())
+                got = self._patches(out, [(x + aw + 2, y + 4, x + aw + 14, y + bh - 4), (x + 2, y + 4, x + aw - 2, y + bh - 4)], 1.5)
+                want = [self._blend(colour, 0.85), colour]
+            elif tpl == "title":  # a full-frame box at 0.55, the accent line under the title
+                got = self._patches(out, [(20, 20, 200, 200)], 1.5) + [self._mode(out, (500, 398, 780, 404), 1.5,
+                                                                                    ignore=self._blend(colour, 0.55))]
+                want = [self._blend(colour, 0.55), colour]
+            elif tpl == "hook":  # the band at 0.78, the bar along the top
+                got = self._patches(out, [(10, 280, 100, 300)], 0.5) + self._patches(out, [(10, 0, 200, 6)], 0.05)
+                want = [self._blend(colour, 0.78), colour]
+            elif tpl == "progress":  # the bar (overlay puts it on even rows: 714-718), and the strip at 0.5 ahead of it
+                got = self._patches(out, [(10, 714, 200, 718)], 2.5) + self._patches(out, [(1180, 716, 1270, 720)], 0.5)
+                want = [colour, self._blend(colour, 0.5)]
+            elif tpl == "chapter":  # drawtext's box at 0.9
+                got, want = [self._mode(out, (0, 360, 640, 720), 1.5)], [self._blend(colour, 0.9)]
+            else:  # the digit at 0.9 opacity at 0.5 s, over its own 0.9 border (the same colour): 0.99
+                got, want = [self._mode(out, (320, 0, 960, 720), 0.5)], [self._blend(colour, 0.99)]
+            cases.append((f"graphics.py {tpl}", out, got, want))
+        if self._has("ass"):
+            out = d / "gfx_ass.mp4"
+            brand = d / "brand_2878C8.json"
+            brand.write_text(json.dumps({"colors": {"primary": "2878C8", "background": "2878C8", "text": "FFFFFF"}}), encoding="utf-8")
+            script("graphics.py", d / "big.mp4", "--template", "chapter", "--brand", brand, "--title", "CHAPTER",
+                   "--text-render", "ass", "--start", "0", "--end", "3", "--fast", "-o", out)
+            # libass's chip: an opaque box in the primary (BorderStyle 3)
+            cases.append(("graphics.py --text-render ass", out, [self._mode(out, (0, 360, 640, 720), 1.5)], [self.BLUE]))
+            out = d / "caption.mp4"
+            script("caption.py", d / "grey.mp4", "--srt", d / "subs.srt", "--color", "FF0000", "--size", "120",
+                   "--outline", "0", "--shadow", "0", "--animate", "none", "--position", "center", "--fast", "-o", out)
+            cases.append(("caption.py --color", out, [self._mode(out, (0, 0, 640, 360), 1.0)], [self.RED]))
+        out = d / "waves.mp4"
+        doc = json.loads(script("waveform.py", d / "loud.wav", "--width", "320", "--height", "180", "--color", "0x00FF00",
+                                "--waveform-mode", "cline", "--quality", "0", "--fast", "--json", "-o", out).stdout)  # lossless
+        # the truth: showwaves draws its colour scaled by its own alpha (0x00FC00 at 252 on this frame,
+        # not 0x00FF00), so the same waves are composited over black in RGB by this build
+        waves = re.search(r"(showwaves=[^,\[]+)", " ".join(doc["commands"])).group(1)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(d / "loud.wav"), "-filter_complex",
+                              f"color=c=black:s=320x180:r=25,format=rgba[bg];[0:a]{waves}[v];[bg][v]overlay=format=auto,format=rgb24",
+                              "-ss", "0.5", "-frames:v", "1", "-f", "rawvideo", "-"], stdout=subprocess.PIPE, check=True).stdout
+        truth = collections.Counter(tuple(raw[i:i + 3]) for i in range(0, len(raw), 3) if any(raw[i:i + 3])).most_common(1)[0][0]
+        cases.append(("waveform.py --color", out, [self._mode(out, (0, 0, 320, 180), ignore=(0, 0, 0))], [truth]))
+        for label, out, got, want in cases:
+            with self.subTest(tool=label):
+                self._check(out, got, want)
+
+    def test_a_picture_that_only_passes_through_keeps_its_pixels(self):
+        """The fix changes only the drawn pixels. Encoded losslessly (--quality 0), the picture of a
+        pad with chroma and of the same pad in black, and of chromatic text and the same text in
+        white, are bit-identical away from what was drawn -- on every build: 7.1+ only labels the
+        untagged picture (tags), 5.1-7.0 draw on an RGB copy and keep the untouched YUV pixels."""
+        src = self.dir / "bars_un.mp4"  # untagged, colourful
+        if not src.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=384x128:rate=25",
+               "-t", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "1", "-pix_fmt", "yuv420p", src)
+
+        def planes(out, rect):
+            w, h = 384, int(probe(str(out))["video"]["height"])
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", "0.5", "-i", str(out), "-frames:v", "1", "-f", "rawvideo",
+                                  "-pix_fmt", "yuv420p", "-"], stdout=subprocess.PIPE, check=True).stdout
+            x0, y0, x1, y1 = rect
+            luma = bytes(raw[y * w + x] for y in range(y0, y1) for x in range(x0, x1))
+            cw, ch = w // 2, h // 2
+            chroma = bytes(raw[w * h + p * cw * ch + y * cw + x] for p in (0, 1)
+                           for y in range(y0 // 2, y1 // 2) for x in range(x0 // 2, x1 // 2))
+            return luma, chroma
+
+        pairs = [("fit.py", ["--width", "384", "--height", "256", "--fit", "pad"], "--pad-color", "0xFF0000", "black",
+                  (0, 72, 384, 184))]
+        if self._has("drawtext"):
+            pairs.append(("overlay.py", ["--text", "X", "--font-size", "40", "--position", "top-left", "--margin", "8",
+                                         "--border", "0"], "--font-color", "0x00FF00", "white", (0, 72, 384, 128)))
+        for tool, args, flag, colour, grey, rect in pairs:
+            with self.subTest(tool=tool):
+                outs = []
+                for c in (colour, grey):
+                    out = self.dir / f"keep_{tool[:-3]}_{c.strip('#')}.mp4"
+                    script(tool, src, *args, flag, c, "--quality", "0", "--fast", "-o", out)
+                    outs.append(planes(out, rect))
+                self.assertEqual(outs[0][0], outs[1][0], f"{tool}: the luma beside the drawing changed")
+                self.assertEqual(outs[0][1], outs[1][1], f"{tool}: the chroma beside the drawing changed")
+
 
 class ScriptFontTests(unittest.TestCase):
     """1.12: which script text is written in, and a font file that actually covers it."""
@@ -3121,7 +3681,12 @@ class LineAwareLayoutTests(unittest.TestCase):
         proc = script("graphics.py", bg, "--template", "title", "--title", "One line", "--subtitle", "plain sub",
                       "-o", OUT / "t2_title1.mp4", "--dry-run", "--json")
         cmd = " ".join(json.loads(proc.stdout)["commands"])
-        self.assertIn("drawbox=x=(iw-86)/2:y=(ih)/2+39:", cmd)
+        # the brand-yellow bar is a converted colour layer since 2.10.3 (drawn colours in BT.709): 86x4
+        # at x=597, y=399 as the drawbox was, placed on overlay's even 4:2:0 grid with a transparent
+        # first column and row
+        self.assertIn("color=c=0xFFD200:s=86x4:", cmd)
+        self.assertIn("pad=87:5:1:1:color=black@0", cmd)
+        self.assertIn("overlay=x=596:y=398:", cmd)
         self.assertIn("y=(h-text_h)/2+60:", cmd)
 
     def test_a_two_line_name_and_title_fit_in_the_lower_third_bar(self):

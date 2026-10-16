@@ -6,6 +6,62 @@
 
 (nothing yet)
 
+## 2.10.3
+
+_Automated release: version and notes generated from pull requests merged since 2.10.2._
+
+### Fixed
+
+- **A colour the skill draws lands in the BT.709 its output is tagged with.** A `--pad-color` (`fit.py`, `export.py`, `join.py`, `broll.py`), `pad.py --color`, `straighten.py --fill-color`, `grid.py --background`/`--font-color`, `overlay.py --text` font/border/box colours, `caption.py`'s burned colours, `graphics.py`'s brand colours (boxes, bars, text), `background.py --color`/`--gradient` and `waveform.py`'s background and waves were turned into YUV by FFmpeg's drawing code with BT.601 under the output's BT.709 tag: pure red came out (255,24,0), pure green (0,216,0) (mean ΔRGB 6.6-33.5, max 34.9-64.0 depending on the tool, on FFmpeg 5.1.1, 6.1, 7.1.1 and 8.1.3; on 7.1+ a BT.709-tagged or converted source's pads were already right). From FFmpeg 7.1 the drawing filters follow the picture's label, so an untagged picture is labelled BT.709 (tags only); before 7.1 nothing makes them use another matrix, so the drawing runs on an RGB copy and only the pixels it touched are taken from it (the rest of the picture is bit-identical). Boxes and backgrounds are colour sources made in RGB and converted; `graphics.py`'s translucent boxes with chroma are overlaid colour layers now, which also blend their colour at the alpha they state (`drawbox` blended 4:2:0 chroma four times over). The ASS files `caption.py` and `graphics.py` write say `YCbCr Matrix: None`, which FFmpeg 8.x needs to draw them in the picture's own matrix (and libass-based players read the same way). After the fix every measured colour is within 1.8 of the truth (mean 0.3-0.95), and within 3.6 for the thin graphics bars. A grey -- black and white pads and text, the default black@0.5 boxes, graphics' near-black background -- is the same under both matrices and plans the command it did; a GIF export, a prores or HDR line and a caller's own `--ass` file are unchanged.
+- **`join.py`, `multicam.py`, `broll.py` and `overlay.py --video` label an untagged clip BT.709 beside a converted one**, as `grid.py` does since #333: on FFmpeg 7.1+ concat/overlay converted one of the two pictures to the other's "unknown" (BT.601) matrix (7.08 mean / 25.0 max ΔRGB with the BT.601 clip first, 9.12 / 40.1 with it second, on 7.1.1 and 8.1.3). The colour tests' "untagged" clips are now untagged on FFmpeg 7.1+ too (they came out tagged bt709 there, so CI on 7.1/8.x/9.x never ran the untagged case).
+- fix(color): draw pad, text, box and background colours in BT.709; label untagged clips in mixed joins (#334)
+
+## 2.10.2
+
+_Automated release: version and notes generated from pull requests merged since 2.10.1._
+
+### Fixed
+
+- **An RGB picture, a JPEG still and every `grid.py` cell are converted to the BT.709 their output is tagged with.** 2.10.1 converted a BT.601-tagged video source; everything else was still made YUV by FFmpeg's own default, BT.601, under a BT.709 tag, so pure red came out (255,24,0) and pure green (0,216,0) to any player that honours the tag (mean ΔRGB 8.8, max 38.9 on FFmpeg 5.1.1, 6.1, 7.1 and 8.1). Now converted explicitly (`scale=out_color_matrix=bt709`): a PNG/JPEG still (`insert.py`), a PNG sequence (`sequence.py`), an RGB clip (qtrle, PNG-in-MOV) through any re-encode, the logo or image of `overlay.py --image` (and `render.py`'s image/logo layers: there the RGBA logo also made `overlay=format=auto` composite in RGB, so the *whole video* came back BT.601, 9.04 mean / 40.6 max ΔRGB on a BT.709 source with 6.1; it now composites in YUV and leaves the video's pixels alone), `waveform.py --image` (the audiogram template) and the emoji PNGs of `graphics.py`/`caption.py`; a palette PNG is expanded first (swscale converts a palette with fixed BT.601). `grid.py` converts each cell by its own tags: it relabelled them on 5.1/6.1, and on 7.1+ `xstack` converted the cells to one another's matrix. Where a converted picture meets an untagged one (an untagged main under a logo, an untagged grid cell beside a converted one), the untagged one is labelled BT.709 (`setparams`, tags only), because FFmpeg 7.1+ otherwise converts one to the other taking "unknown" as BT.601 (the untagged main shifted by 7.08 mean / 25 max ΔRGB on 7.1.1 and 8.1.3). After the fix every measured patch is within 1.6 of its colour (2.6 for a dithered palette PNG). An untagged or BT.709 video source re-encoded alone, and a grid of untagged/BT.709 clips, plan the commands they did.
+- fix(color): convert RGB pictures, JPEG stills and grid cells to BT.709 (#333)
+
+## 2.10.1
+
+_Automated release: version and notes generated from pull requests merged since 2.10.0._
+
+### Fixed
+
+- **A BT.601 source is converted to the BT.709 its re-encode is tagged with, not just relabelled.** Every SDR re-encode (`export.py`'s presets, and `fit`, `cut --accurate`, `crop`, `caption`, `overlay`, `graphics`, `color --lut/--correct` and the other tools that re-encode a video source) tags its output BT.709, and those tags never touch the pixels; through 2.10.0 nothing else did either, so a source tagged `smpte170m` or `bt470bg` (fully, or with only the matrix tag) came out `bt709/bt709/bt709` over unconverted BT.601 pixels (48.5 dB YUV PSNR against the source on FFmpeg 6.1), and every player that honours the tags showed shifted colours. The matrix is now converted with FFmpeg's `colorspace` filter as the first step of the tool's own graph (`_common.bt709_matrix_filter()`; `fcc` and `smpte240m` matrices too); primaries, transfer and range pass through. `join`, `multicam`, `broll` and `overlay --video` convert each input by its own tags. An untagged or BT.709 source, an HDR/BT.2020 source, a stream copy and the `prores` master are unchanged: their commands are what they were. `check.py`'s colour row for a BT.601 matrix now names `export.py` as the fix (any re-encode converts) and says `color.py --retag bt709` only relabels.
+- fix(color): convert a BT.601 source to the BT.709 its re-encode is tagged with (#332)
+
+## 2.10.0
+
+_Automated release: version and notes generated from pull requests merged since 2.9.0._
+
+### Added
+
+- **A `render.py` project can carry a video layer (#326).** An `overlays[]` entry takes `"video": "webcam.mp4"` as a fourth kind next to `logo`/`image`/`text`, mapped to `overlay.py --video` with the same `position`/`scale`/`opacity`/`start`/`end`/`margin`/`platform` keys, plus `"chromakey"`, `"chromakey_similarity"` and `"chromakey_blend"` for green-screen removal. The layer is composited in the overlays stage, after `fit`, so its size is relative to the delivered frame and a template's safe margins apply; `--cache` keys the stage on the layer file's content, `--dry-run` plans the `overlay.py` command, and `--export-timeline` names the layer under `not_exported`. Refused before the first stage (`kind: input`): `video` with another kind in the same entry, a `chromakey*` key without `video`, a similarity or blend without `chromakey`, and a layer file that does not exist. No existing key changes meaning; a project without `video` renders as before. Reported by [@rymalia](https://github.com/rymalia).
+- feat(render): a video layer in overlays[] (overlay.py --video / --chromakey) (#331)
+
+## 2.9.0
+
+_Automated release: version and notes generated from pull requests merged since 2.8.7._
+
+### Added
+
+- **A per-machine speech model, and `--model` on `silence.py --filler --transcribe` (#328).** `FFMPEG_SKILL_ASR_MODEL` is the model `caption.py --transcribe` and `silence.py --filler --transcribe` use when no `--model` is given (else `base`, as before), so a machine with `ggml-large-v3-turbo.bin` no longer needs `--model` on every call, and filler timing is no longer stuck on `base`. An explicit `--model` still wins and still goes to whichever engine runs. A Parakeet model in the variable (an `mlx-community/parakeet-*` repo or a `.gguf`) is offered to the Parakeet engines only and the Whisper engines keep `base`, so a machine default never makes auto's Whisper route for another language fail on a model it cannot load; a Whisper name leaves Parakeet routing and Parakeet's own model as they were. The result's `transcription.model` names the model that ran. `caption.py --model` no longer advertises a `base` default in its schema (it is resolved at run time); `silence.py`'s MCP schema gains `model`.
+- feat: per-machine ASR model (FFMPEG_SKILL_ASR_MODEL) and silence.py --model (#330)
+
+## 2.8.7
+
+_Automated release: version and notes generated from pull requests merged since 2.8.6._
+
+### Fixed
+
+- **`check.py`'s colour row reads the matrix tag.** It decided "untagged" from the primaries and transfer alone, so a file whose only colour tag is a BT.601 matrix (`smpte170m`/`bt470bg`, as some renderers write) passed as `untagged (players assume bt709)` although a player that honours the tag decodes it as BT.601. A non-BT.709 matrix is now a tag: the row is WARN, and so is a BT.709 primaries/transfer file with a BT.601 matrix. For a BT.601 matrix the fix no longer offers `color.py --retag bt709`, which only relabels the pixels (as every SDR re-encode here does); it says to re-export from the master as BT.709. A file tagged only with a BT.709 matrix still passes, worded `bt709 matrix, primaries/transfer untagged (players assume bt709)` instead of "untagged" (#325).
+- fix(check): read the matrix tag in the colour row (#329)
+- chore: expand package keywords and plugin description (#327)
+
 ## 2.8.6
 
 _Automated release: version and notes generated from pull requests merged since 2.8.5._
