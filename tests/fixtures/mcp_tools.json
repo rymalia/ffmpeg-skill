@@ -50,6 +50,7 @@
    "overwrite",
    "plan",
    "replace",
+   "sample_rate",
    "silence_threshold",
    "stereo",
    "stereo_widen",
