@@ -10,7 +10,7 @@ Examples:
   python3 audio.py interview.mp4 --voice light                  # highpass + gentle compression only (light|medium|strong)
   python3 audio.py talk.mp4 --music bed.mp3 --duck              # music under speech, auto-ducked
   python3 audio.py talk.mp4 --music bed.mp3 --music-volume -18 --music-fade-out 3   # bed fades, voice does not
-  python3 audio.py clip.mp4 --fade-in 0.5 --fade-out 1 --stereo
+  python3 audio.py clip.mp4 --fade-in 0.5 --fade-out 1 --stereo --sample-rate 48000
   python3 audio.py talk.mp4 --music bed.mp3 --duck --duck-threshold -30 --duck-release 250   # ducks earlier and recovers faster
   python3 audio.py band.wav --stereo-widen 0.5 -o wide.wav      # wider stereo image (a real stereo source; mono is refused)
   python3 audio.py surround.mov --downmix                       # 5.1 -> stereo with proper centre/LFE weights
@@ -183,8 +183,9 @@ def main() -> int:
     fades.add_argument("--fade-out", type=float, default=0.0, help="seconds; fades the whole final mix (voice included)")
     music.add_argument("--music-fade-out", type=float, default=0.0, help="seconds; fades only the music bed at the end, voice untouched")
     channels = fades.add_mutually_exclusive_group()
-    channels.add_argument("--stereo", action="store_true", help="force 2-channel output (mono is duplicated to both sides)")
-    channels.add_argument("--mono", action="store_true", help="force 1-channel output")
+    channels.add_argument("--stereo", action="store_true", help="force 2-channel output after mixing (mono is duplicated to both sides)")
+    channels.add_argument("--mono", action="store_true", help="force 1-channel output after mixing")
+    fades.add_argument("--sample-rate", type=int, metavar="HZ", help="resample the final output to this sample rate")
     fades.add_argument("--stereo-widen", type=float, default=None, metavar="AMOUNT",
                        help="widen the stereo image, 0..1 (0 = untouched, 1 = maximum); needs a real stereo source: a mono input is "
                             "refused (duplicating it leaves both channels identical, so there is nothing to widen) and more than two "
@@ -243,6 +244,8 @@ def main() -> int:
             die(f"{flag} {value:g} is outside {lo:g}..{hi:g} (the range ffmpeg's sidechaincompress accepts)")
     if args.stereo_widen is not None and not (0.0 <= args.stereo_widen <= 1.0):
         die(f"--stereo-widen must be 0..1 (0 = untouched, 1 = maximum), got {args.stereo_widen:g}")
+    if args.sample_rate is not None and args.sample_rate <= 0:
+        die(f"--sample-rate must be a positive number of Hz, got {args.sample_rate}")
 
     problems = preflight_beds(args)
     silent = find_silent_tracks(args, problems)
@@ -314,15 +317,6 @@ def main() -> int:
         fx.append(dynamics_filter("acompressor", args))
     if args.limit:
         fx.append(dynamics_filter("alimiter", args))
-    if args.mono:
-        in_ch = (meta.get("audio") or {}).get("channels") or 2
-        if in_ch == 2:
-            fx.append("pan=mono|c0=0.5*c0+0.5*c1")
-        elif in_ch > 2:
-            fx.append("aformat=channel_layouts=mono")  # swresample's standard downmix (centre/LFE weighted)
-        # 1 channel: already mono; the stereo pan used to halve it (-6 dB) because c1 was silence
-    elif args.stereo:
-        fx.append("aformat=channel_layouts=stereo")
     if args.stereo_widen is not None:
         # extrastereo widens by scaling the side (L-R) signal: m=1 is the input, m=3 is as wide
         # as it goes before the centre collapses. It runs after the channel layout is settled, so
@@ -367,6 +361,12 @@ def main() -> int:
         last = "mixfx"
 
     post: List[str] = []
+    if args.stereo:
+        post.append("aformat=channel_layouts=stereo")
+    elif args.mono:
+        post.append("aformat=channel_layouts=mono")
+    if args.sample_rate is not None:
+        post.append(f"aresample={args.sample_rate}")
     if args.fade_in:
         post.append(f"afade=t=in:st=0:d={args.fade_in:g}")
     if args.fade_out and dur:
@@ -392,6 +392,8 @@ def main() -> int:
     elif has_video:
         cmd += ["-vn"]  # audio extension: the picture is dropped, not copied into a container that cannot hold it
     cmd += audio_codec_for(output, args.bitrate)
+    if args.sample_rate is not None:
+        cmd += ["-ar", str(args.sample_rate)]
     if not keep_video:
         # audio-only outputs: a looped music bed is infinite, -shortest ends the run with the main track
         cmd.append("-shortest")
@@ -407,7 +409,8 @@ def main() -> int:
     info(f"wrote {output} ({fmt_secs(r['duration'])}, audio {a['codec']} {a['channels']}ch {a['sample_rate']}Hz"
          + (", video stream-copied" if has_video and not audio_out else ", video dropped" if has_video else "") + ")")
     audio_block: Dict[str, Any] = {"voice": args.voice, "stereo_widen": args.stereo_widen,
-                                   "effects": bool(args.effects), "effects_volume": args.effects_volume if args.effects else None}
+                                   "effects": bool(args.effects), "effects_volume": args.effects_volume if args.effects else None,
+                                   "sample_rate": args.sample_rate}
     if args.music:
         audio_block["music_volume"] = args.music_volume
         audio_block["duck"] = ({"amount_db": args.duck_amount, "threshold_db": round(args.duck_threshold, 4),

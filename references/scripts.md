@@ -1542,7 +1542,7 @@ audio.py INPUT [--voice [light|medium|strong] | --denoise [--denoise-strength 25
          [--music FILE [--music-volume -14] [--duck [--duck-amount 12] [--duck-threshold -26.02]
           [--duck-attack 20] [--duck-release 400]] [--music-loop]]
          [--effects FILE [--effects-volume -14]] [--stereo-widen 0..1]
-         [--fade-in S] [--fade-out S] [--stereo | --mono | --downmix] [--replace FILE] [-o OUT]
+         [--fade-in S] [--fade-out S] [--stereo | --mono | --downmix] [--sample-rate HZ] [--replace FILE] [-o OUT]
 ```
 `--voice` takes a strength; a bare `--voice` is `medium`, the chain it has always
 produced. The exact filter chains:
@@ -1575,6 +1575,7 @@ Each of those files, and under `--duck` the voice, is also measured (whole-file 
 not under `--dry-run`): at or below `--silence-threshold` (default -50 dBFS) it is silent.
 `--on-silent warn` (default) mixes it anyway and reports `silent: [{flag, path, peak_db}]`
 plus a note; `--on-silent fail` adds it to the same refusal with reason `silent (peak X dBFS)`.
+`--stereo` / `--mono` set the final layout after all tracks are mixed; a mono source is duplicated for `--stereo`. `--sample-rate HZ` resamples the final track after mixing, before duration padding/trimming. Invalid non-positive rates are refused. `--json` reports the requested rate in `audio.sample_rate` (null when unset).
 `--stereo-widen 0..1` widens the stereo image (`extrastereo=m=1+2*amount`) and
 needs a real stereo source: it scales the side signal (L−R), so a mono track
 duplicated to two channels has nothing to scale. A 1-channel input is refused

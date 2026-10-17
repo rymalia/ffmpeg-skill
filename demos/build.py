@@ -202,6 +202,12 @@ def build_fixtures(force=False):
         ffmpeg("-f", "lavfi", "-i", "aevalsrc='%s':s=48000" % MUSIC,
                "-t", "8", "-c:a", "aac", "-b:a", "128k", str(path))
 
+    # 4b. A 44.1 kHz mono narration track for final audio-format normalization.
+    path = need("narration_44100_mono.wav")
+    if path:
+        ffmpeg("-f", "lavfi", "-i", "sine=frequency=660:sample_rate=44100", "-t", "6",
+               "-c:a", "pcm_s16le", str(path))
+
     # 5. A 5.1 clip: six distinct tones, one per channel, so a downmix is audible and provable.
     path = need("surround.mp4")
     if path:
@@ -725,6 +731,14 @@ def demo_downmix_51(ctx):
     before = FIX / "surround.mp4"
     after = ctx.path("after.mp4")
     ctx.script("audio.py", before, "--downmix", "-o", after)
+    return before, after
+
+
+def demo_audio_sample_rate(ctx):
+    before = FIX / "motion.mp4"
+    after = ctx.path("after.mp4")
+    ctx.script("audio.py", before, "--replace", FIX / "narration_44100_mono.wav",
+               "--stereo", "--sample-rate", "48000", "-o", after)
     return before, after
 
 
@@ -1477,6 +1491,9 @@ _ROWS = [
     ("loudness", AUDIO, "Loudness normalisation to -14 LUFS",
      "Two showwavespic plots: the quiet input on the left, the same programme brought up to broadcast level on the right without clipping.",
      demo_loudness, "wave", None),
+    ("audio_sample_rate", AUDIO, "Normalize final audio format",
+     "Replace audio with 44.1 kHz mono, then write the output as 48 kHz stereo.",
+     demo_audio_sample_rate, "video", None),
     ("downmix_51", AUDIO, "5.1 to stereo downmix",
      "Six discrete tones folded into two channels at the standard coefficients -- the centre and LFE are still audible.",
      demo_downmix_51, "wave", None),

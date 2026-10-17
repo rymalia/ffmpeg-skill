@@ -564,8 +564,10 @@ Per-tool keys added in 1.13: `audio` (`audio.py`) reports the mix it built — t
 `--voice` level, `stereo_widen`, whether an `--effects` bed was mixed, and with
 `--music` the `music_volume` plus a `duck` object naming the threshold (dB and
 linear), ratio, attack and release actually used, or `null` when `--duck` was not
-given. `loudness.py` reports `measured` (the input's loudnorm measurement,
-including `input_lra`) and `targets` (the requested lufs / tp / lra).
+given. `audio.sample_rate` is the requested `--sample-rate` in Hz, or `null` when unset;
+`--sample-rate`, `--stereo` and `--mono` apply after mixing and before duration conformance.
+`loudness.py` reports `measured` (the input's loudnorm measurement, including `input_lra`)
+and `targets` (the requested lufs / tp / lra).
 `check.py --platform podcast` adds two informational rows to `checks`,
 `channels` and `chapters`.
 

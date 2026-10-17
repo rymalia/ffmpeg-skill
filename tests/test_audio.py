@@ -374,6 +374,39 @@ class AudioTests(MediaFixtures):
         self.assertEqual(self._samples(cw)[0], "pcm_s16le")
         self.assertEqual(data["precision"], "sample")
 
+    def test_audio_sample_rate_and_layout_are_terminal_after_mixing(self):
+        main48 = OUT / "sample_norm_main48.mp4"
+        main44mono = OUT / "sample_norm_main44mono.mp4"
+        mono441 = OUT / "sample_norm_mono441.wav"
+        mono32 = OUT / "sample_norm_mono32.wav"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast",
+           "-c:a", "aac", "-ac", "2", main48)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast",
+           "-c:a", "aac", "-ac", "1", main44mono)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=44100", "-t", "2", "-c:a", "pcm_s16le", mono441)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=32000", "-t", "2", "-c:a", "pcm_s16le", mono32)
+
+        cases = [
+            ("extract_48_stereo.wav", main44mono, ["--stereo"], None),
+            ("replace_48_stereo.mp4", main48, ["--replace", str(mono441), "--stereo"], None),
+            ("effects_48_stereo.mp4", main48, ["--effects", str(mono441), "--stereo"], None),
+            ("music_effects_duck_48_stereo.mp4", main48,
+             ["--music", str(mono32), "--effects", str(mono441), "--duck", "--stereo"], None),
+        ]
+        for name, source, flags, _ in cases:
+            out = OUT / name
+            doc = json.loads(script("audio.py", source, *flags, "--sample-rate", "48000", "-o", out, "--json").stdout)
+            self.assertEqual(doc["audio"]["sample_rate"], 48000)
+            result = probe(str(out))
+            self.assertEqual((result["audio"]["sample_rate"], result["audio"]["channels"]), (48000, 2), name)
+            self.assertAlmostEqual(result["duration"], probe(str(source))["duration"], delta=0.06, msg=name)
+
+        invalid = script("audio.py", main48, "--sample-rate", "0", "-o", OUT / "sample_bad.wav", "--json", expect_fail=True)
+        self.assertEqual(json.loads(invalid.stdout)["error"]["kind"], "input")
+        self.assertIn("positive", invalid.stderr)
+
     def test_audio_typed_dynamics(self):
         """--gate / --compress / --limit map typed flags onto acompressor, alimiter, agate; ranges are enforced; the ceiling holds."""
         out = OUT / "dyn.wav"

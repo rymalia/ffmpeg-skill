@@ -7,7 +7,7 @@ description: 'Edit video and audio with local FFmpeg from natural-language reque
 
 Scripts live in `scripts/` next to this file; run them with `python3 <skill-dir>/scripts/<name>.py`, and delivery templates in `templates/`. This file is enough to do a job: the table below routes the request, and `--help` on the script about to run is the cheapest full flag list. A reference file costs as much as this one; open one only for a question you have: `references/scripts.md` (every flag of all 42 scripts), `references/devices.md` (iPhone HDR, GoPro, DJI, screen recordings, Zoom), `references/gotchas.md` (the long form of the one-line rules at the end). MCP: `tools/list` shows only the core 12 by default; the other 30 (per this table) stay callable by name via `tools/call`, described by `contract --json`; set `FFMPEG_SKILL_MCP_FULL=1` for all 42.
 
-Shared flags (every script): `--dry-run`; `--json` (output path, its probe, the commands run); `--json-brief` (status/output/verified + a `summary`; prefer on writing steps); `--fast` (preview quality); `--progress` (percent/ETA); `--timeout SECONDS` (`kind: timeout`, default 1800); `--overwrite` (step 7); `--plan FILE` (a dry run `render.py FILE` runs later; refuses if an input changed). Re-encoding tools also take `--hw` (Apple Silicon GPU, big files; `FFMPEG_SKILL_HW=1` = default, not export), `--codec h264|hevc|av1|prores` and `--quality N`: unset, SDR is x264 (`cut.py --keep-hevc`: HEVC source stays HEVC), HDR is x265 Main10; `prores` needs `-o NAME.mov`, `h264` refuses HDR (`color.py --to-sdr` first).
+Shared flags: `--dry-run`, `--json`/`--json-brief`, `--fast`, `--progress`, `--timeout SECONDS`, `--overwrite`, `--plan FILE`. Re-encoding tools also take `--hw`/`--no-hw`, `--codec h264|hevc|av1|prores` and `--quality N`: SDR defaults to x264, HDR to x265 Main10; ProRes needs `-o NAME.mov`; H.264 refuses HDR (`color.py --to-sdr` first).
 
 Writing tools run nothing under `--dry-run`; the measuring tools (`probe`, `check`, `sync`, `multicam`, `scenes`, `cropdetect`, `report`, `silence`, `loudness`, `stabilize`) may still run ffmpeg/ffprobe, skipping artifacts/side files (`--edl`, `--sheet`, a generated `.ass`); `verify` ignores the flag. Per tool: `contract --json` `dry_run`.
 
@@ -113,6 +113,7 @@ Timestamp flags (`--start`, `--end`, `--at`, `--from`, `--duration`, `--offset`,
 | "make the music duck harder / come back faster" | add `--duck-amount 18 --duck-threshold -30 --duck-release 250` (`--duck-attack` too) |
 | "the mix sounds narrow", "wider stereo" | `audio.py band.wav --stereo-widen 0.5` (needs a real stereo source; 5.1 needs `--downmix`) |
 | "convert the 5.1 to stereo" | `audio.py input.mov --downmix` |
+| "set final audio to 48 kHz stereo" | `audio.py input.mov --stereo --sample-rate 48000` |
 | "swap in the narration track" | `audio.py input.mp4 --replace narration.wav` |
 | "pull the audio out", "give me the sound as WAV" | `audio.py input.mp4 -o input.wav` (an audio extension drops the picture; `--audio-stream 1` picks a track) |
 | "compress the voice", "limit the peaks", "gate the room noise" | `audio.py input.mp4 --compress --comp-threshold -20 --comp-ratio 4` / `--limit --limit-ceiling -1` / `--gate --gate-threshold -45` |

@@ -231,7 +231,7 @@ These are the rules the skill file gives the agent and the code enforces.
 
 | Tool | What it does |
 |---|---|
-| `audio.py` | Voice clean-up chain at three strengths (`--voice light\|medium\|strong`), FFT denoise, typed compressor / limiter / gate, music bed with sidechain ducking (`--duck-amount/-threshold/-attack/-release`), a never-ducked effects bed (`--effects`), `--stereo-widen`, fades, 5.1 → stereo, track replacement, extraction (`-o out.wav`), `--audio-stream N` |
+| `audio.py` | Voice clean-up chain at three strengths (`--voice light\|medium\|strong`), FFT denoise, typed compressor / limiter / gate, music bed with sidechain ducking (`--duck-amount/-threshold/-attack/-release`), a never-ducked effects bed (`--effects`), `--stereo-widen`, fades, terminal `--stereo`/`--mono` and `--sample-rate HZ`, 5.1 → stereo, track replacement, extraction (`-o out.wav`), `--audio-stream N` |
 | `sync.py` | Offset between two recordings by audio cross-correlation (1 ms, pure Python), clock-drift correction; aligned video or audio out (audio-to-audio only — no lip-sync/face detection); a third or later camera is an additional `more_sources` positional (`sync.py REF A B ...`), the `second` positional itself keeps its name |
 | `loudness.py` | Two-pass EBU R128 `loudnorm` to −14 LUFS / −1 dBTP or any target (`--lra` for the range), video stream-copied; the written file is measured again and re-encoded until it meets `--tp` (lossy encoders overshoot); `--measure-only` |
 
@@ -268,7 +268,7 @@ Not tools, but part of the surface: `mcp/server.py` (the MCP transport) and `scr
 
 WAV, FLAC, MP3, M4A/AAC, OGG and Opus go through `probe`, `cut`, `join`, `silence`, `loudness`, `audio`, `sync` and `check --platform podcast` with the same commands as video. The output extension picks the codec: `-o out.wav` writes PCM, `-o out.flac` FLAC, `-o out.mp3` MP3, `-o out.m4a` AAC.
 
-- **Extraction.** An audio extension on a video input drops the picture: `audio.py talk.mp4 -o talk.wav`, or `--voice -o talk.m4a` to clean it on the way. `--audio-stream N` picks a track; `probe` lists them under `audio_streams`.
+- **Extraction and format.** `--sample-rate HZ` resamples the final audio after mixing; `--stereo` / `--mono` also set the final layout after mixing. An audio extension on a video input drops the picture: `audio.py talk.mp4 -o talk.wav`, or `--voice -o talk.m4a` to clean it on the way. `--audio-stream N` picks a track; `probe` lists them under `audio_streams`.
 - **Join.** `join.py intro.wav episode.m4a outro.wav -o full.flac` resamples every clip to one rate and channel layout and crossfades them (`--transition none` for a butt join). Audio and video inputs cannot be mixed in one join.
 - **Sample-accurate trims.** `cut.py talk.wav --start 1.2345 --end 2.3456 --accurate` trims at the sample; the JSON reports `precision` (`packet` for a stream copy, `sample` for PCM / FLAC, `codec_frame` when a lossy encoder frames the audio again, `frame` for video) and the measured `duration_error_ms`. A `.wav` never receives compressed packets.
 - **Typed dynamics.** `audio.py --compress --comp-threshold -20 --comp-ratio 4`, `--limit --limit-ceiling -1`, `--gate --gate-threshold -45`. Each flag is one documented option of FFmpeg's `acompressor`, `alimiter` or `agate`, range-checked before ffmpeg runs; no filter string is accepted from the caller.

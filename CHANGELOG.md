@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+
+- `audio.py --sample-rate HZ` resamples the final audio after all mixing and before duration conformance. `--stereo` and `--mono` now format the final mixed layout; the requested sample rate is reported in the `audio` JSON block.
+
 (nothing yet)
 
 ## 2.10.3

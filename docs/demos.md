@@ -534,6 +534,16 @@ python3 scripts/loudness.py demos/out/loudness_before.mp4 -I -14 --tp -1 -o demo
 
 **Look for:** Two showwavespic plots: the quiet input on the left, the same programme brought up to broadcast level on the right without clipping.
 
+### Normalize final audio format
+
+![Normalize final audio format](demos/audio_sample_rate.gif)
+
+```bash
+python3 scripts/audio.py demos/out/fixtures/motion.mp4 --replace demos/out/fixtures/narration_44100_mono.wav --stereo --sample-rate 48000 -o demos/out/audio_sample_rate_after.mp4
+```
+
+**Look for:** Replace audio with 44.1 kHz mono, then write the output as 48 kHz stereo.
+
 ### 5.1 to stereo downmix
 
 ![5.1 to stereo downmix](demos/downmix_51.gif)
@@ -641,7 +651,6 @@ python3 scripts/proxy.py demos/out/fixtures/mandel.mp4 --width 320 --quality 34 
 
 ```bash
 python3 scripts/render.py demos/out/fixtures/project.json --fast
-python3 scripts/render.py demos/out/fixtures/project.json --export-timeline demos/out/render_project_timeline.otio
 ```
 
 **Look for:** Clips, a transition, captions and a title card described as JSON and rendered in one pass.
