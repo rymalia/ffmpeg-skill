@@ -5,7 +5,9 @@
     python3 tests/test_all.py            # every group
 """
 import json
+import math
 import shlex
+import struct
 import subprocess
 import sys
 import unittest
@@ -374,6 +376,23 @@ class AudioTests(MediaFixtures):
         self.assertEqual(self._samples(cw)[0], "pcm_s16le")
         self.assertEqual(data["precision"], "sample")
 
+    @staticmethod
+    def _tone_levels(path, freqs):
+        """Goertzel level of each frequency over the middle second of `path` (mono 48 kHz), as a
+        fraction of the signal's RMS: about 1 for a lone sine, near 0 for an absent one."""
+        pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "48000",
+                              "-f", "f32le", "-"], capture_output=True, check=True).stdout
+        x = struct.unpack(f"<{len(pcm) // 4}f", pcm)[24000:72000]
+        rms = math.sqrt(sum(v * v for v in x) / len(x)) or 1.0
+        levels = {}
+        for f in freqs:
+            c = 2 * math.cos(2 * math.pi * f / 48000)
+            s1 = s2 = 0.0
+            for v in x:
+                s1, s2 = v + c * s1 - s2, s1
+            levels[f] = math.sqrt(max(s1 * s1 + s2 * s2 - c * s1 * s2, 0.0)) * math.sqrt(2) / len(x) / rms
+        return levels
+
     def test_audio_sample_rate_and_layout_are_terminal_after_mixing(self):
         main48 = OUT / "sample_norm_main48.mp4"
         main44mono = OUT / "sample_norm_main44mono.mp4"
@@ -388,20 +407,27 @@ class AudioTests(MediaFixtures):
         sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=44100", "-t", "2", "-c:a", "pcm_s16le", mono441)
         sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=32000", "-t", "2", "-c:a", "pcm_s16le", mono32)
 
+        # the tones each output must still carry, so a silent (or wrongly mixed) 48 kHz stereo file fails
         cases = [
-            ("extract_48_stereo.wav", main44mono, ["--stereo"], None),
-            ("replace_48_stereo.mp4", main48, ["--replace", str(mono441), "--stereo"], None),
-            ("effects_48_stereo.mp4", main48, ["--effects", str(mono441), "--stereo"], None),
+            ("extract_48_stereo.wav", main44mono, ["--stereo"], {330}),
+            ("replace_48_stereo.mp4", main48, ["--replace", str(mono441), "--stereo"], {660}),
+            ("effects_48_stereo.mp4", main48, ["--effects", str(mono441), "--stereo"], {440, 660}),
             ("music_effects_duck_48_stereo.mp4", main48,
-             ["--music", str(mono32), "--effects", str(mono441), "--duck", "--stereo"], None),
+             ["--music", str(mono32), "--effects", str(mono441), "--duck", "--stereo"], {440, 660, 880}),
         ]
-        for name, source, flags, _ in cases:
+        for name, source, flags, tones in cases:
             out = OUT / name
             doc = json.loads(script("audio.py", source, *flags, "--sample-rate", "48000", "-o", out, "--json").stdout)
             self.assertEqual(doc["audio"]["sample_rate"], 48000)
             result = probe(str(out))
             self.assertEqual((result["audio"]["sample_rate"], result["audio"]["channels"]), (48000, 2), name)
             self.assertAlmostEqual(result["duration"], probe(str(source))["duration"], delta=0.06, msg=name)
+            levels = self._tone_levels(out, {330, 440, 660, 880})
+            for f, level in levels.items():
+                if f in tones:
+                    self.assertGreater(level, 0.05, f"{name}: the {f} Hz source tone is missing ({levels})")
+                else:
+                    self.assertLess(level, 0.02, f"{name}: {f} Hz is not in this mix ({levels})")
 
         invalid = script("audio.py", main48, "--sample-rate", "0", "-o", OUT / "sample_bad.wav", "--json", expect_fail=True)
         self.assertEqual(json.loads(invalid.stdout)["error"]["kind"], "input")
