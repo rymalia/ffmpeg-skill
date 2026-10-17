@@ -225,6 +225,7 @@
   "name": "color",
   "properties": [
    "argv",
+   "assume",
    "audio_stream",
    "codec",
    "contrast",
@@ -254,12 +255,14 @@
    "plan",
    "preset",
    "quality",
+   "range",
    "retag",
    "saturation",
    "strip_dovi",
    "temperature",
    "timeout",
    "tint",
+   "to_bt709",
    "to_sdr",
    "tonemap"
   ],

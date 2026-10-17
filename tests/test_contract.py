@@ -1492,6 +1492,7 @@ class ContractTests(unittest.TestCase):
         color = next(t for t in listed if t["name"] == "color")["inputSchema"]["anyOf"][1]
         self.assertIn({"not": {"required": ["to_sdr", "lut"]}}, color["allOf"])
         self.assertIn({"required": ["to_sdr"]}, color["anyOf"])
+        self.assertIn({"required": ["to_bt709"]}, color["anyOf"])
         # no hand-written schema or tool table is left in the transport
         src = (ROOT / "mcp" / "server.py").read_text(encoding="utf-8")
         self.assertNotIn("TOOLS:", src)

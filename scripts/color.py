@@ -247,7 +247,7 @@ def main() -> int:
                      help="which audio stream of the input to keep, 0-based in file order (probe.py lists them under "
                           "audio_streams) -- matters on a multi-track input (dubbed languages, M&E stems); default 0, "
                           "the first track, same as leaving it unset always did. Only affects modes that re-encode "
-                          "audio (--to-sdr, --lut, --correct, and --retag's re-encode fallback) -- --strip-dovi and "
+                          "audio (--to-sdr, --to-bt709, --lut, --correct, and --retag's re-encode fallback) -- --strip-dovi and "
                           "a successful --retag stream-copy all streams untouched, so the flag has nothing to select there.")
     ap.set_defaults(crf=18)  # --quality's default (the --crf alias was removed in 2.0)
     ap.add_argument("--preset", default="medium", choices=X264_PRESETS)
