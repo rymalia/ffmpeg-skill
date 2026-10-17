@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+
+- `color.py --to-bt709 --assume bt601-525|bt601-625|bt709 --range tv|pc` converts a declared SDR profile (matrix, primaries, transfer and range) to BT.709 limited-range pixels and tags. HDR/BT.2020 sources are refused with a `--to-sdr` hint; ProRes keeps 4:2:2 10-bit output.
+
 (nothing yet)
 
 ## 2.10.3

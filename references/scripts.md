@@ -1501,9 +1501,10 @@ internally (it imports `sync.measure_offset`); `sync.py`'s own N-source CLI
 now exposes that loop directly, for aligning cameras without cutting between
 them.
 
-### color.py — HDR to SDR, LUTs, colour tags, Dolby Vision
+### color.py — SDR/HDR conversion, LUTs, colour tags, Dolby Vision
 ```
 color.py INPUT --to-sdr [--tonemap hable|mobius|reinhard|bt2390] [--peak 1000] [--desat 0] [-o OUT]
+color.py INPUT --to-bt709 --assume bt601-525|bt601-625|bt709 --range tv|pc [-o OUT]
 color.py INPUT --lut grade.cube [--lut-strength 0..1] [-o OUT]
 color.py INPUT --retag bt709|bt2020-pq|bt2020-hlg|bt601 [-o OUT]      # metadata only, stream copy
 color.py INPUT --strip-dovi [-o OUT]                                 # drop the Dolby Vision RPU, keep the HLG/HDR10 base layer (stream copy)
@@ -1528,7 +1529,7 @@ iPhone "HDR" video is Dolby Vision profile 8.4 on an HLG base layer:
 `probe.py` reports `hdr_format: Dolby Vision profile 8` and `--to-sdr`
 tone-maps it from the HLG base layer. When the user wants to keep HDR but
 players mis-render the DV layer, `--strip-dovi` removes it losslessly.
-`--to-sdr` does a real conversion: linearise (zscale, PQ or HLG), tone-map
+`--to-bt709` converts the declared SDR source profile and range, including matrix, primaries and transfer, to BT.709 limited-range pixels and tags; the declaration is required because tags can be missing or wrong. HDR/BT.2020 inputs are refused with a hint to use `--to-sdr`. ProRes output stays 4:2:2 10-bit. `--to-sdr` does a real conversion: linearise (zscale, PQ or HLG), tone-map
 (default `hable`, `mobius` keeps more highlight detail, `bt2390` is the
 broadcast standard), then BT.709 gamma + matrix. Refuses when probe says the
 input is not HDR unless `--force`. `--lut` applies a 3D .cube with

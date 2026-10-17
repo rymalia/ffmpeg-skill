@@ -8,6 +8,7 @@ lift/gain, levels, curves).
 Examples:
   python3 color.py iphone_hdr.mov --to-sdr                       # PQ/HLG -> BT.709 SDR, hable tonemap
   python3 color.py iphone_hdr.mov --to-sdr --tonemap mobius --peak 1000
+  python3 color.py clip.mov --to-bt709 --assume bt601-525 --range tv --codec prores -o clip709.mov
   python3 color.py slog3.mp4 --lut SLog3_to_Rec709.cube            # apply LUT (any Log -> 709 or a look)
   python3 color.py clip.mp4 --lut look.cube --lut-strength 0.6
   python3 color.py wrongly_tagged.mp4 --retag bt709                # metadata only, stream copy
@@ -20,7 +21,7 @@ Examples:
 import argparse
 import os
 import sys
-from typing import List
+from typing import List, Optional
 
 from _common import STATE, add_common, analyze_levels, apply_common, emit, aac_args, cfr_args, default_output, die, escape_filter_path, ffmpeg_base, info, probe, run, run_keeping_subtitles, x264_args, X264_PRESETS, fmt_secs
 
@@ -187,6 +188,24 @@ def bt2020_sdr_to_bt709_chain(meta: dict) -> str:
     ])
 
 
+def to_bt709_chain(assume: str, source_range: str, codec: Optional[str]) -> str:
+    """Convert a declared SDR source profile and range to BT.709 limited-range pixels."""
+    profiles = {
+        "bt601-525": ("170m", "smpte170m", "601"),
+        "bt601-625": ("470bg", "bt470bg", "601"),
+        "bt709": ("709", "bt709", "709"),
+    }
+    matrix, primaries, transfer = profiles[assume]
+    pix_fmt = "yuv422p10le" if codec == "prores" else "yuv420p"
+    return ",".join([
+        f"zscale=min={matrix}:pin={primaries}:tin={transfer}:rin={source_range}:t=linear",
+        "format=gbrpf32le",
+        "zscale=p=bt709",
+        "zscale=t=bt709:m=bt709:r=tv",
+        f"format={pix_fmt}",
+    ])
+
+
 def is_bt2020_sdr(v: dict) -> bool:
     """BT.2020 primaries on a non-HDR transfer and no Dolby Vision: gamut-only --to-sdr."""
     return bool(v.get("bt2020_or_hdr")) and not v.get("hdr_signal") and not v.get("dolby_vision") \
@@ -199,10 +218,13 @@ def main() -> int:
     ap.add_argument("-o", "--output", help="output file (default: <name>_sdr / _lut / _retag)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--to-sdr", action="store_true", help="convert to SDR BT.709: tone-map HDR (PQ/HLG/Dolby Vision); BT.2020 primaries on an SDR transfer get a gamut conversion only, no tone map")
+    mode.add_argument("--to-bt709", action="store_true", help="convert declared SDR source colour to BT.709 limited-range pixels and tags")
     mode.add_argument("--lut", help=".cube LUT to apply (3D)")
     mode.add_argument("--retag", choices=["bt709", "bt2020-pq", "bt2020-hlg", "bt601"], help="rewrite colour tags only (no re-encode)")
     mode.add_argument("--strip-dovi", action="store_true", help="remove the Dolby Vision RPU (profile 8.4 iPhone clips) so players use the plain HLG/HDR10 base layer; stream copy")
     mode.add_argument("--correct", action="store_true", help="typed primary colour correction: --exposure/--contrast/--saturation/--temperature/--tint/--gamma/--lift/--gain/--levels-*/--curves")
+    ap.add_argument("--assume", choices=["bt601-525", "bt601-625", "bt709"], help="--to-bt709: declared source profile (required)")
+    ap.add_argument("--range", choices=["tv", "pc"], help="--to-bt709: declared source range (required)")
     ap.add_argument("--tonemap", choices=TONEMAPS, default="hable", help="tone-mapping curve (default hable)")
     ap.add_argument("--peak", type=float, default=1000.0, help="source peak brightness in nits used for PQ (default 1000)")
     ap.add_argument("--desat", type=float, default=0.0, help="tonemap desaturation strength (default 0)")
@@ -232,6 +254,8 @@ def main() -> int:
     add_common(ap)
     args = ap.parse_args()
     apply_common(args)
+    if not args.to_bt709 and (args.assume is not None or args.range is not None):
+        die("--assume and --range only apply to --to-bt709")
 
     meta = probe(args.input)
     if not meta.get("video"):
@@ -303,7 +327,17 @@ def main() -> int:
 
     measurements = None
     sdr_extra: dict = {}
-    if args.to_sdr:
+    if args.to_bt709:
+        if not args.assume:
+            die("--to-bt709 needs --assume bt601-525|bt601-625|bt709")
+        if not args.range:
+            die("--to-bt709 needs --range tv|pc")
+        if v.get("bt2020_or_hdr"):
+            die(f"{args.input} is HDR or BT.2020; run --to-sdr instead of --to-bt709")
+        vf = to_bt709_chain(args.assume, args.range, STATE.codec)
+        output = args.output or default_output(args.input, "bt709")
+        tag = "to-bt709"
+    elif args.to_sdr:
         if not v.get("bt2020_or_hdr") and not args.force:
             die(f"{args.input} is not tagged as HDR (transfer={v.get('color_transfer')}, primaries={v.get('color_primaries')}). Use --force to tone-map anyway.")
         if is_bt2020_sdr(v):
@@ -355,12 +389,16 @@ def main() -> int:
     cmd = ffmpeg_base() + ["-i", args.input, "-vf", vf, "-map", "0:v:0", "-map", f"0:a:{args.audio_stream}?"]
     # --lut/--correct grade the source's own pixels, so a BT.601 source is converted to the BT.709
     # the line is tagged with; --to-sdr's zscale chain already writes BT.709 and converts nothing more
-    cmd += x264_args(args.crf, args.preset, source=None if args.to_sdr else meta) + cfr_args(meta) + (aac_args() if has_audio else [])
+    cmd += x264_args(args.crf, args.preset, source=None if (args.to_sdr or args.to_bt709) else meta) + cfr_args(meta) + (aac_args() if has_audio else [])
+    if args.to_bt709:
+        cmd += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
     dropped_streams = run_keeping_subtitles(cmd, output)
     r = probe(output, role="output")
     info(f"wrote {output} ({fmt_secs(r['duration'])}, {r['video']['width']}x{r['video']['height']}, "
          f"{r['video']['color_transfer']}/{r['video']['color_primaries']}, {tag})")
     extra = {"dropped_non_av_streams": dropped_streams, **sdr_extra}
+    if args.to_bt709:
+        extra["color_action"] = f"to-bt709 ({args.assume}/{args.range})"
     if measurements is not None:
         measurements["output"] = analyze_levels(output)
         extra["measurements"] = measurements

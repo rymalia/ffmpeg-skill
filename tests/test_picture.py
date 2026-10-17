@@ -2301,6 +2301,42 @@ class Bt601ConversionTests(unittest.TestCase):
                 self.assertGreater(converted, 38.0, f"{tool}: the BT.709 output does not show the BT.601 source's colours")
                 self.assertLess(relabelled, 32.0, f"{tool}: the pixels were relabelled, not converted")
 
+    def test_color_to_bt709_converts_declared_601_to_prores(self):
+        src = self.clips["full601"]
+        out = OUT / "matrix_to_bt709_prores.mov"
+        doc = json.loads(script("color.py", src, "--to-bt709", "--assume", "bt601-525", "--range", "tv",
+                                "--codec", "prores", "--no-hw", "-o", out, "--json").stdout)
+        command = " ".join(doc["commands"])
+        self.assertIn("zscale=min=170m:pin=smpte170m:tin=601:rin=tv:t=linear", command)
+        self.assertIn("format=yuv422p10le", command)
+        self.assertEqual(doc["probe"]["video"]["pix_fmt"], "yuv422p10le")
+        self._assert_bt709_tags(out)
+        self.assertEqual(probe(str(out))["video"]["color_range"], "tv")
+        # Cross-check zscale against FFmpeg's independent colorspace implementation of the
+        # same complete 601-to-709 conversion; the ProRes encode adds only a small loss.
+        compare = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(src), "-i", str(out), "-lavfi",
+                                  "[0:v]colorspace=ispace=smpte170m:iprimaries=smpte170m:itrc=smpte170m:space=bt709:primaries=bt709:trc=bt709:range=tv,format=yuv422p10le,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=gbrp[ref];"
+                                  "[1:v]setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=gbrp[out];[ref][out]psnr",
+                                  "-f", "null", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(compare.returncode, 0, compare.stderr[-800:])
+        match = re.search(r"average:(inf|[\d.]+)", compare.stderr)
+        self.assertIsNotNone(match, compare.stderr[-800:])
+        self.assertGreater(float(match.group(1)), 23.0, "zscale output differs from the colorspace BT.709 reference")
+
+    def test_color_to_bt709_requires_declarations_and_refuses_hdr(self):
+        for argv, expected in ((["--to-bt709", "--range", "tv"], "--assume"),
+                               (["--to-bt709", "--assume", "bt709"], "--range")):
+            proc = script("color.py", self.clips["untagged"], *argv, "--json", expect_fail=True)
+            self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+            self.assertIn(expected, proc.stderr)
+        hdr = OUT / "matrix_bt709_hdr.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=1",
+           "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params",
+           "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", hdr)
+        proc = script("color.py", hdr, "--to-bt709", "--assume", "bt709", "--range", "tv", "--json", expect_fail=True)
+        self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+        self.assertIn("--to-sdr", proc.stderr)
+
     def test_an_untagged_or_bt709_source_is_not_converted(self):
         """Untagged SDR is taken as BT.709 by players, and converting it is the 7.1 auto-conversion
         bt709_tag_args() exists to avoid: no conversion is planned and the pixels stay the source's."""

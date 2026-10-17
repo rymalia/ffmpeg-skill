@@ -180,6 +180,16 @@ python3 scripts/color.py demos/out/fixtures/hdr10.mp4 --to-sdr --tonemap hable -
 
 **Look for:** The PQ / BT.2020 source is tone-mapped to BT.709: on an SDR screen the 'before' is the washed-out one.
 
+### Declared SDR to BT.709
+
+![Declared SDR to BT.709](demos/color_bt709.gif)
+
+```bash
+python3 scripts/color.py demos/out/fixtures/bt601.mp4 --to-bt709 --assume bt601-525 --range tv --codec prores --no-hw -o demos/out/color_bt709_after.mov
+```
+
+**Look for:** Convert a declared BT.601 source to BT.709 limited-range pixels and tags.
+
 ### 16:9 to 9:16 by cropping
 
 ![16:9 to 9:16 by cropping](demos/reframe_crop.gif)
@@ -641,7 +651,6 @@ python3 scripts/proxy.py demos/out/fixtures/mandel.mp4 --width 320 --quality 34 
 
 ```bash
 python3 scripts/render.py demos/out/fixtures/project.json --fast
-python3 scripts/render.py demos/out/fixtures/project.json --export-timeline demos/out/render_project_timeline.otio
 ```
 
 **Look for:** Clips, a transition, captions and a title card described as JSON and rendered in one pass.

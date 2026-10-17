@@ -211,6 +211,13 @@ def build_fixtures(force=False):
                "-t", "6", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "6", str(path))
 
+    # 5b. A BT.601 source for the declared SDR-to-BT.709 conversion demo.
+    path = need("bt601.mp4")
+    if path:
+        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "5",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+               "-x264-params", "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m", str(path))
+
     # 6. An HDR10 clip: 10-bit HEVC tagged PQ / BT.2020, like tests/ builds.
     path = need("hdr10.mp4")
     if path:
@@ -652,6 +659,14 @@ def demo_hdr_tonemap(ctx):
     after = ctx.path("after.mp4")
     ctx.script("color.py", before, "--to-sdr", "--tonemap", "hable", "--preset", "veryfast",
                "-o", after)
+    return before, after
+
+
+def demo_color_bt709(ctx):
+    before = FIX / "bt601.mp4"
+    after = ctx.path("after.mov")
+    ctx.script("color.py", before, "--to-bt709", "--assume", "bt601-525", "--range", "tv",
+               "--codec", "prores", "--no-hw", "-o", after)
     return before, after
 
 
@@ -1452,6 +1467,9 @@ _ROWS = [
     ("hdr_tonemap", PICTURE, "HDR10 to SDR",
      "The PQ / BT.2020 source is tone-mapped to BT.709: on an SDR screen the 'before' is the washed-out one.",
      demo_hdr_tonemap, "video", None),
+    ("color_bt709", PICTURE, "Declared SDR to BT.709",
+     "Convert a declared BT.601 source to BT.709 limited-range pixels and tags.",
+     demo_color_bt709, "video", None),
     ("reframe_crop", PICTURE, "16:9 to 9:16 by cropping",
      "The vertical frame is cut out of the centre of the wide one -- full height, sides lost.",
      demo_reframe_crop, "video", None),
