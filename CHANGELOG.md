@@ -6,6 +6,34 @@
 
 (nothing yet)
 
+## 2.10.5
+
+_Automated release: version and notes generated from pull requests merged since 2.10.4._
+
+### Added
+
+- **README FAQ.** Answers the questions that followed the tool being shared: a caller cannot pass a filter graph or other raw ffmpeg arguments (schemas come from each script's argparse, and CI fails on drift; `doctor` checks the filters beforehand); Remotion and HyperFrames render a picture from code, and a file they write is an ordinary input here; a fixed logo or burned-in line can be interpolated with `redact.py --mode delogo`, while inpainting and anything that moves stay out of scope; nothing tracks a face or a subject; the GPU encode path is Apple VideoToolbox.
+- **`redact.py --mode delogo`.** ffmpeg's `delogo` filter, with the same typed rectangle as blur and pixelate (`--x`, `--y`, `--width`, `--height`). It fills that rectangle from the picture around it. The box has to sit at least 1 px inside the frame (the filter's band is fixed at 1, and the option is gone), and an HDR or 10-bit source is refused. A separate script was not added: this is the known-box operation `redact.py` already owns, and the tool count stays 42.
+
+### Fixed
+
+- **`cut.py --accurate` starts the picture at 0 (#336).** The re-encode passed `-avoid_negative_ts make_zero`, which shifts every stream so the earliest timestamp is 0. That timestamp is the AAC encoder's priming (21.3 ms at 48 kHz) or a negative B-frame decode time, so the picture started after 0 and the sound at 0. `fit.py --fps` then changed the frame count. The video re-encode no longer passes the flag. When `--start` lands on a frame, that frame is at 0. A start between frames begins on the next source frame and may keep up to one frame of its timestamp. An MP4/MOV edit list hides the priming, and a source whose audio starts late keeps that offset. A stream copy still uses `make_zero` (or `--edit-list`). An audio-only `--accurate` cut still uses it, which is the priming `precision: codec_frame` counts in the length.
+- **Windows 11 resolves Nirmala UI for Hindi, Bengali and Tamil (#339).** The font ships as `C:\Windows\Fonts\Nirmala.ttc`. `WINDOWS_FONTS` only named `Nirmala.ttf` and `NirmalaB.ttf`, so `doctor` reported no font for `hi`, `bn` and `ta`. The collection is now in those three lists, after the `.ttf` names, so a machine that still has Mangal or `Nirmala.ttf` keeps that file.
+- fix(cut): start an accurate re-encode's picture at 0 (#342)
+- docs: answer the shared questions, and remove a fixed logo as a redact mode (#341)
+
+Closes: #336, #339
+
+## 2.10.4
+
+_Automated release: version and notes generated from pull requests merged since 2.10.3._
+
+### Fixed
+
+- **`join.py` no longer leaves a one-frame hole where a clip's picture starts after 0.** A cut part often has its first video packet a little after its first audio packet (0.08 s against 0.058 s here). Every clip's sound chain already started at 0 (`asetpts=PTS-STARTPTS`), but its picture chain kept the offset, so the concat filter (and `xfade`'s offsets) placed it one frame late: a `--transition none` join of a 2.53 s and a 3.0 s clip at 30 fps came out 166 frames over 5.567 s (29.82 fps, `verified: false`). video-editing-skill's CONCAT correctly refused the file. This was introduced in 2.4.1 (#302), when the plain cut started trimming every clip to `clip_length`. The picture now starts at 0 like its sound: 166 frames over 5.533 s at exactly 30 fps.
+- fix(join): start each clip's picture at 0 so a late first frame leaves no hole (#338)
+- docs(readme): fresnel-style header with a Liquid Glass app icon (#337)
+
 ## 2.10.3
 
 _Automated release: version and notes generated from pull requests merged since 2.10.2._

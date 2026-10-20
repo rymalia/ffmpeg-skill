@@ -21,7 +21,7 @@ The contract is derived from the code that runs, not maintained beside it:
 | Field | Meaning | Changes when |
 |---|---|---|
 | `contract_version` | shape of this document (`1.0`) | a key is renamed, removed or changes meaning |
-| `skill.version` | the npm / package.json version (`2.10.3`) | any release |
+| `skill.version` | the npm / package.json version (`2.10.5`) | any release |
 
 A release that adds a tool or a flag keeps `contract_version`; a breaking change to the
 ToolSpec shape bumps it. Consumers pin on `contract_version` and read `skill.version`
@@ -119,7 +119,7 @@ JSON would have been rewritten for that. The flat keys, typed per tool in `outpu
   "contract_version": "1.0",
   "deprecated": [],
   "removed": [{"what": "...", "since": "1.10.0", "replacement": "...", "removed_in": "2.0.0", "where": "cli | json | mcp | behaviour"}],
-  "skill": {"id": "ffmpeg-skill", "version": "2.10.3", "execution_mode": "local", "kind": "execution",
+  "skill": {"id": "ffmpeg-skill", "version": "2.10.5", "execution_mode": "local", "kind": "execution",
             "entrypoints": {"cli": "...", "mcp": "...", "contract": "...", "doctor": "..."},
             "not_provided": ["AI reasoning", "decisions", "production plans", "project IR", "approvals", "network access", "transcription engine"]},
   "requirements": {"python": ">=3.9 (standard library only)", "ffmpeg": ">=5.0", "ffprobe": ">=5.0"},
@@ -383,6 +383,12 @@ ffmpeg/ffprobe/python versions and the paths of the ffmpeg/ffprobe binaries the 
 environment variables (`doctor`'s `hw.default_on` is a boolean derived from `FFMPEG_SKILL_HW`,
 never its value). The two binary paths can sit under a home directory, so read a pasted `doctor`
 before posting it.
+
+`filter:delogo` is optional on `redact` (`--mode delogo`). The filter fills a fixed
+rectangle from a 1 px ring of the surrounding picture. It is a border blend,
+not inpainting, and its pixel formats are 8-bit YUV, so an HDR or 10-bit
+source is refused (`color.py --to-sdr` first). `filter:boxblur` stays required
+on `redact`, because `--mode blur` is the default.
 
 `external:whisper` is **optional** for two tools since 1.17: `caption.py`
 (`--transcribe`) and `silence.py` (`--filler --transcribe`). Neither requires

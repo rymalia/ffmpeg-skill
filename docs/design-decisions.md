@@ -1570,6 +1570,44 @@ not a new file format this tool would have to maintain.
   `start_snapped`'s meaning (the presented start moved) and `precision` takes
   `least_exact_precision`'s (the least exact segment).
 
+## Unreleased — an accurate cut starts its picture at 0
+
+- **`cut.py --accurate` on a video does not pass `-avoid_negative_ts make_zero`.** The
+  flag shifts every stream so the earliest timestamp is 0. On a re-encode that timestamp
+  is the AAC encoder's priming (1024 samples, 21.3 ms at 48 kHz) or, with B-frames, a
+  negative video decode time further back, so the picture started after 0 and the sound
+  at 0 (#336). `fit.py --fps` then snapped the gap and changed the frame count. Dropping
+  the flag leaves the first frame at 0 when `--start` lands on a frame. A start between
+  frames begins on the next source frame. On FFmpeg 6.1 that frame's timestamp is 0; on
+  7.1, the Homebrew build and the Windows build it keeps about one frame (0.033 s), the
+  grid the decoder already had. Moving the picture alone to erase that frame would leave
+  the sound a frame ahead. An MP4/MOV edit list still hides the priming, so the sound
+  presents with the picture; a Matroska file keeps the priming packet at a negative time
+  and the picture at 0. A source whose audio starts late keeps that offset. Audio-only
+  `--accurate` still uses `make_zero`: `asetpts` already starts the samples at 0, and the
+  flag is what folds the priming into the length `precision: codec_frame` reports. A stream
+  copy is unchanged
+  (`make_zero` by default, `--edit-list` to hide the keyframe's pre-roll). Code:
+  `cut.cut_one()`. Test: `test_an_accurate_reencode_starts_the_picture_at_zero`.
+
+## Unreleased — a fixed logo comes off with redact.py --mode delogo
+
+- **`--mode delogo` is a mode of `redact.py`, not a 43rd script.** The operation is the one
+  redact already has: a caller-supplied rectangle, applied to the whole clip, with no search
+  for the region. A new tool would restate that and move the count the 1.16 and 1.17 entries
+  above keep at 42. Blur and pixelate obscure the box; delogo fills it from the surrounding
+  pixels (ffmpeg's `delogo`). It is a border blend. Inpainting, a logo that moves, and
+  burned-in text whose position changes are out of scope, same as a face the caller did not
+  box. Code: `redact.main()`. Tests: `test_delogo_interpolates_a_fixed_rectangle_and_refuses_the_frame_edge`,
+  `test_delogo_refuses_a_10_bit_source`.
+- **The box must leave a 1 px ring, because `delogo` expands it by a band that is no longer a
+  flag.** On 5.1 through current the filter sets `band = 1`, grows the rectangle by that ring
+  and refuses the frame when the ring leaves it (`x < 1`, `y < 1`, or `x + width` / `y + height`
+  flush with the far edge). Passing `band` is an error on 6.1 ("Option not found"), so the tool
+  does not expose it. An HDR or 10-bit source is refused up front: the filter's pixel formats
+  are 8-bit YUV, and letting ffmpeg insert a scale would flatten the picture without saying so.
+  Code: `redact.main()`. Tests: the two named above.
+
 ## Unreleased — a video layer in a project
 
 - **`overlays[]` refuses `video` beside another layer kind, and only that combination.** A video

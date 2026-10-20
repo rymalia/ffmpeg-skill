@@ -91,7 +91,16 @@ max(2 frames, 0.1 s) away from the source's own offset where the picture starts
 (the keyframe the copy began from; `--start` under `--edit-list`). It is
 reported, not repaired. `-ss`/`-t` are passed to the microsecond; `--accurate`
 seeks a second early and trims on the output side, so frames just before a
-keyframe are kept. `keyframe_snapped` is true for every stream copy (`precision`
+keyframe are kept. An `--accurate` re-encode of a video does not pass
+`-avoid_negative_ts make_zero`, which shifted the picture by the AAC priming
+(about 21 ms, more when a B-frame decode time is negative) while the sound
+stayed at 0, and `fit.py --fps` then changed the frame count. A start that
+lands on a frame leaves that frame at time 0. A start between frames begins on
+the next source frame and may keep up to one frame of timestamp. A `.mp4`/`.mov`
+edit list hides the priming. A source whose audio starts after its picture keeps
+that offset. An audio-only `--accurate` cut
+still uses `make_zero`; that priming is what `precision: codec_frame` counts
+in the length. `keyframe_snapped` is true for every stream copy (`precision`
 `packet`); `start_snapped` is measured: true when a copied picture starts more
 than a frame from `--start`, or when its start could not be measured (an unknown start is
 never claimed exact); `null` under `--dry-run`.
@@ -272,18 +281,25 @@ Heavier denoising trades fine detail for a cleaner but softer image -- for
 audio noise reduction use `audio.py --denoise` instead, this tool only
 touches the picture.
 
-### redact.py — blur or pixelate an exact rectangle
+### redact.py — blur, pixelate, or interpolate away an exact rectangle
 ```
-redact.py INPUT --x X --y Y --width W --height H [--mode blur|pixelate]
+redact.py INPUT --x X --y Y --width W --height H [--mode blur|pixelate|delogo]
                  [--blur-strength N] [--block-size N] [-o OUT]
 ```
 Same rectangle convention as `crop.py` -- the rectangle must already be
 known (a saved detection box, a hand-picked region); this tool does not
-locate faces or plates itself. `--mode blur` (default) box-blurs the
-rectangle; `--mode pixelate` mosaics it into `--block-size`-px blocks, the
-more unmistakably-redacted look often wanted for compliance footage. The
-rest of the frame, and the whole clip's timeline, are untouched -- to
-redact only part of the timeline, `cut.py` the clip into segments first.
+locate faces, plates, logos or burned-in text itself. `--mode blur`
+(default) box-blurs the rectangle; `--mode pixelate` mosaics it into
+`--block-size`-px blocks, the more unmistakably-redacted look often wanted
+for compliance footage. `--mode delogo` runs ffmpeg's `delogo` filter,
+which fills the rectangle from the picture around it: a fixed logo or a
+burned-in line that does not move. That is a border blend, not inpainting,
+and a logo that travels or subtitles that change position are out of
+scope. The filter reads a 1 px ring outside the box, so the box cannot
+touch the frame edge, and it only interpolates 8-bit YUV (an HDR or 10-bit
+source is refused; `color.py --to-sdr` first). The rest of the frame, and
+the whole clip's timeline, are untouched -- to cover only part of the
+timeline, `cut.py` the clip into segments first.
 
 ### sphere.py — flat viewport extraction from 360/spherical video
 ```
