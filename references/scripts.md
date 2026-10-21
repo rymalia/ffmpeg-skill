@@ -242,7 +242,10 @@ cropdetect.py INPUT [--seconds N] [--samples N] [--limit F] [--round N] [--motio
 Measurement only -- writes no file. Samples `--samples` windows spread
 across the file (default 5, totalling `--seconds` 10s of footage) and
 reports the crop rectangle FFmpeg's `cropdetect` filter found most often, as
-`{x, y, width, height}` ready to hand to `crop.py`. Distinct from
+`{x, y, width, height}` ready to hand to `crop.py`. `source_width` /
+`source_height` are that same displayed frame: a 90° or 270° rotation swaps
+the stored size, because the filter measures the picture after ffmpeg applies
+the tag. Distinct from
 `fit.py --fit crop`, which crops to a target aspect ratio it computes
 itself with no black-bar measurement involved. A rectangle that matches the
 full source frame means no bars were found. Does not decide whether
@@ -501,7 +504,8 @@ broll.py A.mp4 --insert B.mp4 --at T [--duration D | --end T2] [--from T3]
                [--insert ... --at ...] [--audio a|b|mix] [--pad-color black] [-o OUT]
 ```
 A plays as it is; during each window B's picture is shown instead (scaled and
-padded to A's frame, A's fps), and A resumes at its own time when the window
+padded to A's displayed frame, A's fps; a 90° or 270° rotation swaps the
+stored size), and A resumes at its own time when the window
 ends -- a cutaway, not a splice, so the output is exactly as long as A. One
 `--insert`/`--at` pair per cutaway (`--duration`, `--end`, `--from` are per
 cutaway too, or given once for all; defaults 4 s and 0); windows may not
@@ -755,10 +759,13 @@ An `overlays[]` entry draws one of `"logo": true`, `"image"`, `"text"` or
 `"video"` (#326: a picture-in-picture or green-screen layer, `overlay.py
 --video`), with `position`, `scale`, `opacity`, `start`, `end`, `margin`,
 `platform` (and `fade`, `box`, `font*` for the still/text kinds) mapping to
-overlay.py's flags. `"chromakey": "0x00ff00"`, `"chromakey_similarity"` and
-`"chromakey_blend"` key a colour out of the video layer. The stage runs after
-`fit`, so `"scale": 480` is 480 px of the delivered frame, and a template's
-safe margins apply as they do to a logo. Refused (`kind: input`) before the
+overlay.py's flags. `scale` is the layer width in px for a logo, image or
+video (`"scale": 480` is 480 px of the delivered frame, because the stage
+runs after `fit`). A text entry's size is `font_size`; `scale` on a text-only
+entry is refused (`kind: input`) rather than drawn at the default font size.
+`"chromakey": "0x00ff00"`, `"chromakey_similarity"` and
+`"chromakey_blend"` key a colour out of the video layer. A template's
+safe margins apply as they do to a logo. Also refused before the
 first stage: `video` together with `logo`/`image`/`text` in one entry (a
 logo, image and text together still draw the first of them, as before), a
 `chromakey*` key without `video`, `chromakey_similarity`/`_blend` without
@@ -1217,7 +1224,8 @@ Outputs PNG. View it with the Read tool (or any image viewer) and judge the
 frame like an editor would. Use `--compare` to show before/after to the user. `--safe NAME` (1.14) shades the zones that
 destination's own UI covers -- TikTok's description block and like column, the Reels/Shorts
 chrome -- on the sheet or the frame, so "is the caption readable" can be answered about the app
-rather than about the file.
+rather than about the file. The "wrong aspect" note compares the displayed frame, so a phone
+file stored sideways is not flagged when the picture already matches the destination.
 
 ### caption.py — subtitles (static, animated, karaoke)
 ```
@@ -1463,8 +1471,13 @@ overlay.py INPUT --image PNG [--scale W | --scale-percent P] | --text "..." [--f
 `--platform NAME` (1.14) takes each edge's margin from that destination's safe zone
 (`scripts/_platforms.py`), so a template's top-left logo clears TikTok's status bar instead of
 sitting 24 px into it; an explicit `--margin` (or a brand `safe_margin`) wins.
+`--scale-percent` and those margins use the displayed frame width and height:
+a 90° or 270° rotation swaps the stored size, which is the frame the overlay
+is composited on.
 Alpha in PNGs is respected. Fades apply to the overlay only; the video keeps
-playing. `--video` composites a second video as a picture-in-picture layer
+playing. `--scale` / `--scale-percent` set the width of an image, logo or
+`--video` layer. They are refused with `--text`: text size is `--font-size`.
+`--video` composites a second video as a picture-in-picture layer
 (same position/scale/opacity/time-range knobs as `--image`); only the main
 input's audio is kept, the PiP layer's own audio is dropped. `--chromakey`
 (with `--video`) keys out that colour first for green-screen compositing.

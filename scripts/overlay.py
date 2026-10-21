@@ -116,8 +116,10 @@ def main() -> int:
     ap.add_argument("--fade", type=float, default=0.0, help="fade-in duration in seconds (at --start or 0); the fade-out happens only at --end")
     ap.add_argument("--opacity", type=float, default=1.0, help="0..1 (default 1)")
     img = ap.add_argument_group("image options")
-    img.add_argument("--scale", type=int, help="scale the image to this width in px (keeps aspect)")
-    img.add_argument("--scale-percent", type=float, help="scale the image to this %% of the video width")
+    img.add_argument("--scale", type=int, help="width in px for an image, logo or video layer (keeps aspect); text size is --font-size")
+    img.add_argument("--scale-percent", type=float,
+                     help="width as a %% of the displayed frame for an image, logo or video layer (keeps aspect); "
+                          "a 90 or 270 degree rotation uses the stored height; text size is --font-size")
     txt = ap.add_argument_group("text options")
     txt.add_argument("--font", default="DejaVu Sans", help="fontconfig font name")
     txt.add_argument("--font-file", help="explicit .ttf/.otf/.ttc path (use this for CJK fonts)")
@@ -158,6 +160,10 @@ def main() -> int:
         die("--text is blank -- give the words to draw", kind="input")
     if not (args.image or args.text or args.video):
         die("give --image, --text, --logo or --video")
+    # --scale is a layer width. On a text draw it used to be accepted and ignored (fontsize stayed
+    # at --font-size), so a project that asked for 200 px text completed with the 42 px default.
+    if args.text and not (args.image or args.video) and (args.scale is not None or args.scale_percent is not None):
+        die("--scale and --scale-percent size an image, logo or video layer; text size is --font-size", kind="input")
     if args.brand:
         if args.margin == ap.get_default("margin"):
             args.margin = int(brand.get("safe_margin", args.margin))
@@ -205,7 +211,12 @@ def main() -> int:
         die(f"--audio-stream {args.audio_stream}: input has {len(audio_streams)} audio stream(s), 0..{len(audio_streams) - 1}")
     if args.audio_stream and not audio_streams:
         die("--audio-stream needs an input with audio streams")
-    vw = meta["video"]["width"]
+    vw = meta["video"]["width"] or 0
+    vh = meta["video"].get("height") or 0
+    # ffmpeg applies display rotation before the filter graph, so the frame this overlay is
+    # composited on is the displayed one. A 320x180 phone file tagged 90 degrees is 180 wide here.
+    if meta["video"].get("rotation") in (90, -90, 270, -270):
+        vw, vh = vh, vw
     # --platform: the edges this destination's own UI covers, in pixels of this frame. An
     # explicit --margin (or a brand safe_margin, applied above) is the more specific statement
     # and wins; without either, the historical 24 px default is unchanged.
@@ -216,7 +227,7 @@ def main() -> int:
         # fall back to the destination's own delivery frame -- which is what the fitted
         # intermediate this stage runs on will be anyway
         frame = PLATFORMS[args.platform]["frame"]
-        pw, ph = vw or frame["w"], meta["video"].get("height") or frame["h"]
+        pw, ph = vw or frame["w"], vh or frame["h"]
         safe_margins = safe_margins_px(args.platform, pw, ph)
         info(f"--platform {args.platform}: safe margins top {safe_margins['top']} / bottom {safe_margins['bottom']} / "
              f"left {safe_margins['left']} / right {safe_margins['right']} px (clear of the app's own UI)")

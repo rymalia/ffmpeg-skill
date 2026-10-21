@@ -21,7 +21,7 @@ The contract is derived from the code that runs, not maintained beside it:
 | Field | Meaning | Changes when |
 |---|---|---|
 | `contract_version` | shape of this document (`1.0`) | a key is renamed, removed or changes meaning |
-| `skill.version` | the npm / package.json version (`2.10.5`) | any release |
+| `skill.version` | the npm / package.json version (`2.10.7`) | any release |
 
 A release that adds a tool or a flag keeps `contract_version`; a breaking change to the
 ToolSpec shape bumps it. Consumers pin on `contract_version` and read `skill.version`
@@ -119,7 +119,7 @@ JSON would have been rewritten for that. The flat keys, typed per tool in `outpu
   "contract_version": "1.0",
   "deprecated": [],
   "removed": [{"what": "...", "since": "1.10.0", "replacement": "...", "removed_in": "2.0.0", "where": "cli | json | mcp | behaviour"}],
-  "skill": {"id": "ffmpeg-skill", "version": "2.10.5", "execution_mode": "local", "kind": "execution",
+  "skill": {"id": "ffmpeg-skill", "version": "2.10.7", "execution_mode": "local", "kind": "execution",
             "entrypoints": {"cli": "...", "mcp": "...", "contract": "...", "doctor": "..."},
             "not_provided": ["AI reasoning", "decisions", "production plans", "project IR", "approvals", "network access", "transcription engine"]},
   "requirements": {"python": ">=3.9 (standard library only)", "ffmpeg": ">=5.0", "ffprobe": ">=5.0"},
@@ -613,7 +613,7 @@ Per-tool keys added in 1.18.0, all additive:
 | `shots` | `scenes.py --shots` | `[{start, end, label, flow_magnitude}]` per detected scene, `label` one of `static`/`pan`/`motion` from a lightweight block-matching optical-flow proxy (frames decoded at 4 fps, 48x27, no external dependency). A shot too short to sample two frames is `static` with `flow_magnitude: 0` |
 | `audio_peaks_db` | `scenes.py --audio-peaks` | `[{time, level}]`, measured dBFS loudness peaks. A **new** key: the pre-existing `audio_peaks` (always reported, unrelated unitless RMS figures used for `--highlights` scoring) keeps its 1.0 meaning unchanged |
 | `speech` | `scenes.py --speech` | `[{time, speech_music_ratio}]`, a per-second zero-crossing-rate ratio against the file's own median — a measured proxy, not a speech/music classification |
-| `motion_centre` | `cropdetect.py --motion-centre` | `[{time, x, y, x_frac, y_frac, motion}]` per second, sampled over the same windows as the crop-bar detection. `x`/`y` are source pixels, `x_frac`/`y_frac` a 0..1 fraction of `source_width`/`source_height`; a window with no measured motion reports `x`/`y`/`x_frac`/`y_frac: null`. Report only — this tool never picks a reframe |
+| `motion_centre` | `cropdetect.py --motion-centre` | `[{time, x, y, x_frac, y_frac, motion}]` per second, sampled over the same windows as the crop-bar detection. `x`/`y` are source pixels, `x_frac`/`y_frac` a 0..1 fraction of `source_width`/`source_height`. Those two sizes are the displayed frame (a 90° or 270° rotation swaps the stored size), the same frame the crop rectangle and `crop.py` use. A window with no measured motion reports `x`/`y`/`x_frac`/`y_frac: null`. Report only — this tool never picks a reframe |
 | `speech_aware`, `speech_aware.breaths` | `silence.py --speech-aware` | `{min_silence, floor, breaths_kept, breaths_kept_seconds, breaths}`. `breaths` are the sub-`--min-silence` gaps kept because they sit inside a sentence; the removal list (`silences`, `keep`, `removed_seconds`) already reflects the speech-aware classification. Composes with `--filler` through the same `keep_ranges()`/`merge_spans()` pipeline, so `--speech-aware --filler` produces one removal list |
 | `sources` | `sync.py` | `[{path, offset_s, confidence, drift_ppm}]`, one entry per SOURCE. Present for every run, including the original single-SOURCE shape (where it mirrors the top-level `second`/`offset_seconds`/`confidence` additively). With 2+ SOURCEs it is the *only* per-source shape: there is no top-level `second`/`offset_seconds` because there is no single pair to put there |
 | `switch_mode`, `min_shot` | `multicam.py --switch energy` | `"energy"` and the `--min-shot` value used (default 1.5s), alongside the existing `cuts` (`[[start, end, camera], ...]`) which already carries the camera index for `--edl`'s companion cut list |

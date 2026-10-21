@@ -56,6 +56,20 @@ class AnalysisTests(MediaFixtures):
         self.assertLess(result["crop"]["height"], 480)
         self.assertGreater(result["crop"]["y"], 0)
 
+    def test_cropdetect_reports_the_displayed_frame_of_a_rotated_source(self):
+        """cropdetect runs after ffmpeg applies rotation. The stored 1280x720 phone file is
+        720x1280 on screen, and a rectangle reported against the stored size is taller than
+        the source it claims to sit in."""
+        v = probe(str(self.rot))["video"]
+        self.assertIn(v["rotation"], (90, -90, 270, -270))
+        dw, dh = v["height"], v["width"]
+        data = json.loads(script("cropdetect.py", self.rot, "--seconds", "1", "--samples", "1", "--json").stdout)
+        self.assertEqual((data["source_width"], data["source_height"]), (dw, dh))
+        crop = data["crop"]
+        self.assertIsNotNone(crop)
+        self.assertLessEqual(crop["x"] + crop["width"], data["source_width"])
+        self.assertLessEqual(crop["y"] + crop["height"], data["source_height"])
+
     def test_cropdetect_writes_no_file(self):
         before = set(OUT.iterdir())
         script("cropdetect.py", self.src, "--seconds", "1", "--samples", "1")
@@ -137,11 +151,21 @@ class AnalysisTests(MediaFixtures):
         proc = script("sync.py", self.src, self.mic, "--json")
         data = json.loads(proc.stdout)
         self.assertClose(data["offset_seconds"], 2.5, 0.05, "lav mic started 2.5 s later")
+        self.assertIn("later than reference", data["meaning"])
         self.assertGreater(data["confidence"], 0.5)
         out = OUT / "synced.mp4"
         script("sync.py", self.src, self.mic, "--replace-audio", "-o", out)
         again = json.loads(script("sync.py", self.src, out, "--json").stdout)
         self.assertClose(again["offset_seconds"], 0.0, 0.05, "aligned output has no residual offset")
+
+    def test_sync_zero_offset_says_the_files_start_together(self):
+        """A measured offset of 0 used to take the else of `later if offset > 0` and say the
+        second file starts earlier. Identical inputs start together."""
+        same = OUT / "sync_identical.mp4"
+        shutil.copy(self.src, same)
+        data = json.loads(script("sync.py", self.src, same, "--json").stdout)
+        self.assertAlmostEqual(data["offset_seconds"], 0.0, delta=5e-4)
+        self.assertEqual(data["meaning"], "second starts together with the reference")
 
     def test_sync_replace_audio_stream_copy_writes_faststart_mp4(self):
         """Same shape as #275/#277: --replace-audio stream-copies the reference's video with
@@ -694,6 +718,19 @@ class AnalysisTests(MediaFixtures):
         self.assertTrue(cmd, doc["commands"])
         self.assertIn("y=ih*(1-0.22)", cmd[0])
         self.assertIn("x=iw*(1-0.14)", cmd[0])
+
+    def test_look_safe_compares_the_displayed_aspect_of_a_rotated_source(self):
+        """A 1280x720 file tagged 90 degrees is already 9:16. --safe tiktok used to warn that
+        the stored 16:9 frame was the wrong shape for a destination the picture already matches."""
+        v = probe(str(self.rot))["video"]
+        self.assertIn(v["rotation"], (90, -90, 270, -270))
+        proc = script("look.py", self.rot, "--at", "1", "--no-timecode", "--safe", "tiktok",
+                      "-o", OUT / "safe_rot.png", "--json")
+        self.assertNotIn("not tiktok", proc.stderr)
+        self.assertNotIn(f"{v['width']}x{v['height']}", proc.stderr)
+        wide = script("look.py", self.src, "--at", "1", "--no-timecode", "--safe", "tiktok",
+                      "-o", OUT / "safe_wide.png", "--json")
+        self.assertIn(f"{v['width']}x{v['height']}", wide.stderr)
 
     def test_report_html(self):
         reels = OUT / "export_reels.mp4"

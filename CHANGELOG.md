@@ -4,7 +4,25 @@
 
 ## Unreleased
 
-(nothing yet)
+### Added
+
+- **README FAQ.** How ffmpeg-skill compares with Remotion: it edits existing footage locally with FFmpeg tools and a machine-readable contract; Remotion renders from React; a file Remotion or HyperFrames writes is an ordinary input here. Whether the filter graph is validated before a run: no. `--dry-run` prints a writing tool's ffmpeg command and does not start ffmpeg. `--plan` records that dry run and fingerprints inputs; `render.py` re-runs the tool later, it does not ask ffmpeg to parse the graph. `doctor` checks capability names against `ffmpeg -filters`, `-encoders` and `-bsfs`.
+
+## 2.10.7
+
+_Automated release: version and notes generated from pull requests merged since 2.10.6._
+
+### Fixed
+
+- **A rotated file is measured and composited at the size it is shown.** ffmpeg applies a 90° or 270° display rotation before the filter graph, and `probe.py` still reports the stored width and height. `overlay.py --scale-percent` took half of that stored width (a 50% logo on a 320×180 phone file shown as 180×320 was 160 px, almost the whole frame). `--platform` margins used the same stored size, so TikTok's 14% right margin was 14% of the landscape width. `broll.py` scaled the cutaway to the stored frame and clipped it onto the portrait one. `cropdetect.py` reported `source_width`/`source_height` as the stored size while the rectangle was in the displayed frame (a 176×320 crop against a 320×180 source). `look.py --safe` warned that a 9:16 phone file stored as 16:9 was the wrong shape for TikTok. The displayed size is what those tools use now.
+- **The colour-emoji probe survives a path that contains a colon, and a Windows font path is not split on the drive letter.** `subtitles=C:/...` is read as the option `C` plus a following option, so the probe that decides whether libass can draw colour emoji failed on every Windows temp directory and reported the capability unknown. The same `fc-list` line `C:\Windows\Fonts\seguiemj.ttf: Segoe UI Emoji` was split on the first colon, so the font file was `C` and a monochrome fallback was never found. The probe now uses the filter-path escape, and the listing is split on colon-space, which is the separator fontconfig prints.
+- fix: measure rotated frames at the size they are shown (#344)
+
+## 2.10.6
+
+_Automated release: version and notes generated from pull requests merged since 2.10.5._
+
+- fix: release-check catalogue, overlay scale, sync wording, MCP timeout (#343)
 
 ## 2.10.5
 
@@ -17,6 +35,13 @@ _Automated release: version and notes generated from pull requests merged since 
 
 ### Fixed
 
+- **`npm run release-check` lists the full MCP catalogue.** Since the default `tools/list` became the core 12, step 4 required at least 15 names and step 6 required every contract tool, both against the default list. Both steps now set `FFMPEG_SKILL_MCP_FULL=1`. The same script refuses a tarball that contains `references/process-pitfalls.md`.
+- **A text overlay no longer ignores `scale`.** `--scale` / `--scale-percent` size an image, logo or video layer. On text they were accepted and the draw stayed at the default font size, including a render project that forwarded `overlays[].scale` for a text entry. That combination is now refused (`kind: input`); text size is `--font-size` / `font_size`.
+- **`sync.py` says two files that start together start together.** A measured offset of 0 used to read "second starts 0.000s earlier than reference".
+- **MCP `--timeout 0` in a raw `argv` list clears the outer ceiling.** The structured `timeout` key already did. The argv form left the dispatch ceiling at 4×1800 s while the child ran with no limit.
+- **`fit.py --fit blur` on HDR prints `-15%`, not `-15%%`.**
+- **`speedramp.py` cuts the last segment where it was asked to** when that end is more than 50 ms before the file. The end bound used to be omitted for every last segment, so an end inside the 0.5 s coverage slack played the tail at that segment's speed. An end that is the file's end still runs to the last packet.
+- **`npx ffmpeg-skill doctor` on Windows tries the next Python when `python3` is the Store alias.** That alias spawns and exits non-zero, which the installer used to treat as a found interpreter.
 - **`cut.py --accurate` starts the picture at 0 (#336).** The re-encode passed `-avoid_negative_ts make_zero`, which shifts every stream so the earliest timestamp is 0. That timestamp is the AAC encoder's priming (21.3 ms at 48 kHz) or a negative B-frame decode time, so the picture started after 0 and the sound at 0. `fit.py --fps` then changed the frame count. The video re-encode no longer passes the flag. When `--start` lands on a frame, that frame is at 0. A start between frames begins on the next source frame and may keep up to one frame of its timestamp. An MP4/MOV edit list hides the priming, and a source whose audio starts late keeps that offset. A stream copy still uses `make_zero` (or `--edit-list`). An audio-only `--accurate` cut still uses it, which is the priming `precision: codec_frame` counts in the length.
 - **Windows 11 resolves Nirmala UI for Hindi, Bengali and Tamil (#339).** The font ships as `C:\Windows\Fonts\Nirmala.ttc`. `WINDOWS_FONTS` only named `Nirmala.ttf` and `NirmalaB.ttf`, so `doctor` reported no font for `hi`, `bn` and `ta`. The collection is now in those three lists, after the `.ttf` names, so a machine that still has Mangal or `Nirmala.ttf` keeps that file.
 - fix(cut): start an accurate re-encode's picture at 0 (#342)
