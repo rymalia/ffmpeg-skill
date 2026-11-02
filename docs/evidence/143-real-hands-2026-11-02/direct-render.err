@@ -1,0 +1,21 @@
+warning: frame: 1080x1920 from the tiktok export preset (captions and overlays are sized for delivery)
+intermediate stages: preset superfast (the export re-encodes them; --intermediate-preset medium for the stages' own default)
+→ fit.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/話す clip 🎤.mp4 -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/fit.mp4 --aspect 9:16 --fit crop --width 1080 --height 1920 --preset superfast --timeout 1800
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/fit.mp4 (12.000s, 1080x1920)
+→ caption.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/fit.mp4 -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.mp4 --text /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/字幕 subs.srt --size 24 --position bottom --margin 63 --animate pop --outline 2 --fit-size on --karaoke --platform tiktok --preset superfast --timeout 1800
+    caption size 24 -> 15 ASS units (5.2 % of frame height) so 5 cue(s) fit --max-lines 2; floor 13
+    cues: 5 wrapped, 3 rebalanced, 3 phrase_breaks
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.srt (9 cues, 00:00:00:00-00:00:26:29 @ 29.97fps)
+    font: /Library/Fonts/Arial Unicode.ttf (covers ja)
+    warning: emoji rendered monochrome (no colour path on this ffmpeg; --emoji-assets DIR for colour). Apple Color Emoji installed but libass renders it monochrome on this build
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.ass (9 cues, animate=pop, karaoke=True)
+    warning: 5 cue(s) fall outside the video (0–12.0 s) and are not drawn
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.mp4 (12.000s)
+    caption text unchanged: the cues were burned exactly as given (line breaks, timing and type size only)
+→ loudness.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.mp4 -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/loudnorm.mp4 -I -14 --tp -1.0 --timeout 1800
+    measured: -21.9 LUFS, TP -13.7 dBTP, LRA 0.0 LU
+    result:   -13.9 LUFS, TP -5.6 dBTP (target -14.0 LUFS, TP <= -1)
+→ export.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/loudnorm.mp4 --preset tiktok -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4 --normalize --timeout 1800
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4 (12.000s, 1080x1920, h264)
+check: OK for tiktok
+rendered /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4 via clips → fit → captions → loudness → export → check

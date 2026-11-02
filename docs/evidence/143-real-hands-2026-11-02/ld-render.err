@@ -1,0 +1,23 @@
+warning: frame: 1080x1920 from the tiktok export preset (captions and overlays are sized for delivery)
+intermediate stages: preset superfast (the export re-encodes them; --intermediate-preset medium for the stages' own default)
+→ fit.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/話す clip 🎤.mp4 -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/fit.mp4 --aspect 9:16 --fit crop --width 1080 --height 1920 --preset superfast --timeout 1800
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/fit.mp4 (12.000s, 1080x1920)
+→ caption.py /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/fit.mp4 -o /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.mp4 --srt /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/字幕 subs.srt --size 24 --position bottom --margin 63 --animate pop --outline 2 --fit-size on --karaoke --platform tiktok --preset superfast --timeout 1800
+    caption size 24 -> 17 ASS units (5.9 % of frame height) so 2 cue(s) fit --max-lines 2; floor 13
+    cues: 2 wrapped
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned_adjusted.srt (3 cues, adjusted from 字幕 subs.srt)
+    font: /Library/Fonts/Arial Unicode.ttf (covers ja)
+    warning: emoji rendered monochrome (no colour path on this ffmpeg; --emoji-assets DIR for colour). Apple Color Emoji installed; the colour render probe was not run
+    wrote /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass (3 cues, animate=pop, karaoke=True)
+    error: command failed (234): /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg
+    [AVFilterGraph @ 0x75e5040580] No option name near '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts'
+    [AVFilterGraph @ 0x75e5040580] Error parsing a filter description around: 
+    [AVFilterGraph @ 0x75e5040580] Error parsing filterchain 'ass=/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts' around: 
+    Error opening output file /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.mp4.
+    Error opening output files: Invalid argument
+error: caption.py failed: command failed (234): /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg
+[AVFilterGraph @ 0x75e5040580] No option name near '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts'
+[AVFilterGraph @ 0x75e5040580] Error parsing a filter description around: 
+[AVFilterGraph @ 0x75e5040580] Error parsing filterchain 'ass=/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts' around: 
+Error opening output file /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.mp4.
+Error opening output files: Invalid argument

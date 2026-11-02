@@ -1,0 +1,345 @@
+{
+  "available": [
+    "bsf:av1_metadata",
+    "bsf:filter_units",
+    "bsf:h264_metadata",
+    "bsf:hevc_metadata",
+    "bsf:mpeg2_metadata",
+    "bsf:vp9_metadata",
+    "encoder:aac",
+    "encoder:flac",
+    "encoder:gif",
+    "encoder:libmp3lame",
+    "encoder:libopus",
+    "encoder:libsvtav1",
+    "encoder:libx264",
+    "encoder:libx265",
+    "encoder:mov_text",
+    "encoder:prores_ks",
+    "encoder:srt",
+    "encoder:webvtt",
+    "external:parakeet",
+    "external:whisper",
+    "ffmpeg",
+    "ffprobe",
+    "filter:acompressor",
+    "filter:acrossfade",
+    "filter:afftdn",
+    "filter:agate",
+    "filter:alimiter",
+    "filter:amix",
+    "filter:areverse",
+    "filter:blackdetect",
+    "filter:boxblur",
+    "filter:chromakey",
+    "filter:colorbalance",
+    "filter:colorlevels",
+    "filter:colortemperature",
+    "filter:cropdetect",
+    "filter:curves",
+    "filter:deesser",
+    "filter:delogo",
+    "filter:drawbox",
+    "filter:eq",
+    "filter:exposure",
+    "filter:extrastereo",
+    "filter:freezedetect",
+    "filter:gradients",
+    "filter:hqdn3d",
+    "filter:loop",
+    "filter:loudnorm",
+    "filter:lut3d",
+    "filter:minterpolate",
+    "filter:overlay",
+    "filter:palettegen",
+    "filter:reverse",
+    "filter:rotate",
+    "filter:scdet",
+    "filter:showspectrum",
+    "filter:showwaves",
+    "filter:sidechaincompress",
+    "filter:signalstats",
+    "filter:silencedetect",
+    "filter:tile",
+    "filter:tonemap",
+    "filter:tpad",
+    "filter:v360",
+    "filter:xfade",
+    "filter:xstack",
+    "filter:yadif",
+    "filter:zoompan"
+  ],
+  "covered_by": {},
+  "detection": {
+    "bsfs": {
+      "count": 51,
+      "detail": "51 entries",
+      "status": "parsed"
+    },
+    "encoders": {
+      "count": 190,
+      "detail": "190 entries",
+      "status": "parsed"
+    },
+    "filters": {
+      "count": 481,
+      "detail": "481 entries",
+      "status": "parsed"
+    }
+  },
+  "errors": [],
+  "ffmpeg": "9.0.2",
+  "ffmpeg_path": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg",
+  "ffmpeg_security": {
+    "checked": "2026-10-22",
+    "ffmpeg": {
+      "advisories": [],
+      "status": "not_older",
+      "version": "9.0.2"
+    },
+    "ffprobe": {
+      "advisories": [],
+      "status": "not_older",
+      "version": "9.0.2"
+    },
+    "source": "https://ffmpeg.org/security.html",
+    "warnings": []
+  },
+  "ffmpeg_source": "path",
+  "ffprobe": "9.0.2",
+  "ffprobe_path": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffprobe",
+  "ffprobe_source": "path",
+  "fonts": {
+    "default_font": "DejaVu Sans",
+    "detail": "fc-match resolves 'DejaVu Sans' to itself",
+    "emoji": {
+      "assets": null,
+      "color_font": "Apple Color Emoji",
+      "color_font_file": "/System/Library/Fonts/Apple Color Emoji.ttc",
+      "detail": "Apple Color Emoji installed; the colour render probe was not run",
+      "fix": "point --emoji-assets at a directory of PNGs named by code point (1f389.png): twemoji/assets/72x72 (Twemoji, CC-BY 4.0) or noto-emoji/png/128 (Noto Emoji, OFL/Apache-2.0) are the two people already have. The skill has no network at runtime, so the assets must already exist on this machine -- nothing is ever downloaded",
+      "libass_color": null,
+      "mode": "mono"
+    },
+    "scripts": {
+      "ar": {
+        "file": "/Users/rymalia/Library/Fonts/DejaVuSans.ttf",
+        "status": "available"
+      },
+      "bn": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "el": {
+        "file": "/Users/rymalia/Library/Fonts/DejaVuSans.ttf",
+        "status": "available"
+      },
+      "he": {
+        "file": "/Users/rymalia/Library/Fonts/DejaVuSans.ttf",
+        "status": "available"
+      },
+      "hi": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "ja": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "ko": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "lo": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "ru": {
+        "file": "/Users/rymalia/Library/Fonts/DejaVuSans.ttf",
+        "status": "available"
+      },
+      "ta": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "th": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      },
+      "zh": {
+        "file": "/Library/Fonts/Arial Unicode.ttf",
+        "status": "available"
+      }
+    },
+    "status": "available"
+  },
+  "gpu_encoders": {
+    "present": [
+      "h264_videotoolbox",
+      "hevc_videotoolbox",
+      "prores_videotoolbox"
+    ],
+    "status": "parsed"
+  },
+  "hw": {
+    "default_on": false,
+    "platform_ok": true
+  },
+  "missing": [
+    "filter:drawtext",
+    "filter:subtitles",
+    "filter:vidstabdetect",
+    "filter:vidstabtransform"
+  ],
+  "missing_optional": [
+    "encoder:libvorbis",
+    "filter:ass",
+    "filter:zscale"
+  ],
+  "ok": false,
+  "python": "3.15.2",
+  "tools": {
+    "audio": {
+      "usable": "yes"
+    },
+    "background": {
+      "usable": "yes"
+    },
+    "batch": {
+      "usable": "yes"
+    },
+    "broll": {
+      "usable": "yes"
+    },
+    "caption": {
+      "fix": "this ffmpeg build has no subtitles filter; on macOS, brew install ffmpeg-full; export PATH=\"$(brew --prefix ffmpeg-full)/bin:$PATH\" (ffmpeg-full is keg-only, so installing it does not replace the ffmpeg already found: keep the export in your shell profile; the plain formula lacks subtitles/drawtext/zscale)",
+      "missing": [
+        "filter:subtitles"
+      ],
+      "usable": "no"
+    },
+    "check": {
+      "usable": "yes"
+    },
+    "color": {
+      "usable": "yes"
+    },
+    "crop": {
+      "usable": "yes"
+    },
+    "cropdetect": {
+      "usable": "yes"
+    },
+    "cut": {
+      "usable": "yes"
+    },
+    "deinterlace": {
+      "usable": "yes"
+    },
+    "denoise": {
+      "usable": "yes"
+    },
+    "export": {
+      "usable": "yes"
+    },
+    "fit": {
+      "usable": "yes"
+    },
+    "freeze": {
+      "usable": "yes"
+    },
+    "graphics": {
+      "fix": "this ffmpeg build has no drawtext filter (no freetype); on macOS, brew install ffmpeg-full; export PATH=\"$(brew --prefix ffmpeg-full)/bin:$PATH\" (ffmpeg-full is keg-only, so installing it does not replace the ffmpeg already found: keep the export in your shell profile; the plain formula lacks subtitles/drawtext/zscale)",
+      "missing": [
+        "filter:drawtext"
+      ],
+      "usable": "no"
+    },
+    "grid": {
+      "usable": "yes"
+    },
+    "insert": {
+      "usable": "yes"
+    },
+    "join": {
+      "usable": "yes"
+    },
+    "look": {
+      "usable": "yes"
+    },
+    "loop": {
+      "usable": "yes"
+    },
+    "loudness": {
+      "usable": "yes"
+    },
+    "metadata": {
+      "usable": "yes"
+    },
+    "multicam": {
+      "usable": "yes"
+    },
+    "overlay": {
+      "usable": "yes"
+    },
+    "pad": {
+      "usable": "yes"
+    },
+    "probe": {
+      "usable": "yes"
+    },
+    "proxy": {
+      "usable": "yes"
+    },
+    "redact": {
+      "usable": "yes"
+    },
+    "render": {
+      "usable": "yes"
+    },
+    "report": {
+      "usable": "yes"
+    },
+    "reverse": {
+      "usable": "yes"
+    },
+    "scenes": {
+      "usable": "yes"
+    },
+    "sequence": {
+      "usable": "yes"
+    },
+    "silence": {
+      "usable": "yes"
+    },
+    "speedramp": {
+      "usable": "yes"
+    },
+    "sphere": {
+      "usable": "yes"
+    },
+    "stabilize": {
+      "fix": "this ffmpeg build has no vidstabdetect filter; on macOS, brew install ffmpeg-full; export PATH=\"$(brew --prefix ffmpeg-full)/bin:$PATH\" (ffmpeg-full is keg-only, so installing it does not replace the ffmpeg already found: keep the export in your shell profile; the plain formula lacks subtitles/drawtext/zscale); this ffmpeg build has no vidstabtransform filter; on macOS, brew install ffmpeg-full; export PATH=\"$(brew --prefix ffmpeg-full)/bin:$PATH\" (ffmpeg-full is keg-only, so installing it does not replace the ffmpeg already found: keep the export in your shell profile; the plain formula lacks subtitles/drawtext/zscale)",
+      "missing": [
+        "filter:vidstabdetect",
+        "filter:vidstabtransform"
+      ],
+      "usable": "no"
+    },
+    "straighten": {
+      "usable": "yes"
+    },
+    "sync": {
+      "usable": "yes"
+    },
+    "verify": {
+      "usable": "yes"
+    },
+    "waveform": {
+      "usable": "yes"
+    }
+  },
+  "unknown": [],
+  "unsupported": [],
+  "version": "3.1.1"
+}

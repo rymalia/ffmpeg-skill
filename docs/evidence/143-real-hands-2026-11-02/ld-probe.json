@@ -1,0 +1,84 @@
+{
+  "file": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/iPhone 撮影 📱.MOV",
+  "format": "mov,mp4,m4a,3gp,3g2,mj2",
+  "duration": 1.733333,
+  "start_time": 0.0,
+  "size_bytes": 4522338,
+  "bitrate": 20872333,
+  "video": {
+    "codec": "hevc",
+    "profile": "Main 10",
+    "width": 1920,
+    "height": 1080,
+    "display_aspect": "16:9",
+    "fps": 59.942,
+    "r_frame_rate": "60000/1001",
+    "avg_frame_rate": "20800/347",
+    "variable_frame_rate_suspected": false,
+    "pix_fmt": "yuv420p10le",
+    "bit_depth": 10,
+    "hdr": true,
+    "hdr_signal": true,
+    "bt2020_or_hdr": true,
+    "hdr_format": "Dolby Vision profile 8",
+    "dolby_vision": {
+      "profile": 8,
+      "level": 5,
+      "bl_compatibility_id": 4
+    },
+    "color_space": "bt2020nc",
+    "color_primaries": "bt2020",
+    "color_transfer": "arib-std-b67",
+    "color_range": "tv",
+    "rotation": -90,
+    "nb_frames": 104,
+    "duration": 1.733333,
+    "tagged_duration": null,
+    "start_time": 0.0,
+    "bitrate": 20012491
+  },
+  "audio": {
+    "codec": "aac",
+    "channels": 2,
+    "channel_layout": "stereo",
+    "sample_rate": 48000,
+    "bitrate": 173848,
+    "duration": 1.733333,
+    "start_time": 0.0,
+    "tagged_duration": null
+  },
+  "subtitle_streams": 0,
+  "data_streams": 6,
+  "stream_counts": {
+    "video": 1,
+    "audio": 2
+  },
+  "chapters": [],
+  "tags": {},
+  "timecode": {
+    "value": null,
+    "drop_frame": null,
+    "source": null
+  },
+  "subtitle_stream_details": [],
+  "audio_streams": [
+    {
+      "index": 0,
+      "codec": "aac",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "sample_rate": 48000,
+      "language": "und",
+      "title": null
+    },
+    {
+      "index": 1,
+      "codec": "apple_apac",
+      "channels": 4,
+      "channel_layout": null,
+      "sample_rate": 48000,
+      "language": "und",
+      "title": null
+    }
+  ]
+}

@@ -1,0 +1,440 @@
+{
+  "status": "completed",
+  "output": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4",
+  "dry_run": false,
+  "commands": [
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/話す clip 🎤.mp4' -vf 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(in_w-out_w)*0.5:(in_h-out_h)*0.5,setsar=1' -map 0:v:0 -map 0:a:0 -c:v libx264 -preset superfast -crf 18 -pix_fmt yuv420p -movflags +faststart -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -c:a aac -b:a 192k -map '0:s?' -map '0:d?' -c:s copy -c:d copy '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/fit.mp4'",
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/fit.mp4' -map 0:v:0 -vf 'ass=/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.ass:fontsdir=/Library/Fonts' -map 0:a:0 -c:v libx264 -preset superfast -crf 18 -pix_fmt yuv420p -movflags +faststart -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -c:a aac -b:a 192k '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.mp4'",
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/captioned.mp4' -af loudnorm=I=-14.0:TP=-1.0:LRA=11.0:measured_I=-21.85:measured_TP=-13.73:measured_LRA=0.00:measured_thresh=-31.85:offset=0.05:linear=true:print_format=summary,atrim=duration=12.000000 -ar 44100 -map 0:v:0 -map 0:a:0 -c:v copy -c:a aac -b:a 192k -movflags +faststart -map '0:s?' -map '0:d?' -c:s copy -c:d copy '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/loudnorm.mp4'",
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦_work_14741/loudnorm.mp4' -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1' -c:v libx264 -preset medium -crf 20 -profile:v high -pix_fmt yuv420p -r 30 -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -movflags +faststart -c:a aac -b:a 128k -ar 48000 '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4'"
+  ],
+  "probe": {
+    "file": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4",
+    "format": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": 12.0,
+    "start_time": 0.0,
+    "size_bytes": 4883901,
+    "bitrate": 3255934,
+    "video": {
+      "codec": "h264",
+      "profile": "High",
+      "width": 1080,
+      "height": 1920,
+      "display_aspect": "9:16",
+      "fps": 30.0,
+      "r_frame_rate": "30/1",
+      "avg_frame_rate": "30/1",
+      "variable_frame_rate_suspected": false,
+      "pix_fmt": "yuv420p",
+      "bit_depth": 8,
+      "hdr": false,
+      "hdr_signal": false,
+      "bt2020_or_hdr": false,
+      "hdr_format": null,
+      "dolby_vision": null,
+      "color_space": "bt709",
+      "color_primaries": "bt709",
+      "color_transfer": "bt709",
+      "color_range": "tv",
+      "rotation": 0,
+      "nb_frames": 359,
+      "duration": 11.966667,
+      "tagged_duration": null,
+      "start_time": 0.0,
+      "bitrate": 3128214
+    },
+    "audio": {
+      "codec": "aac",
+      "channels": 1,
+      "channel_layout": "mono",
+      "sample_rate": 48000,
+      "bitrate": 127132,
+      "duration": 12.0,
+      "start_time": 0.0,
+      "tagged_duration": null
+    },
+    "subtitle_streams": 0,
+    "data_streams": 0,
+    "stream_counts": {
+      "video": 1,
+      "audio": 1
+    },
+    "chapters": [],
+    "tags": {},
+    "timecode": {
+      "value": null,
+      "drop_frame": null,
+      "source": null
+    },
+    "subtitle_stream_details": [],
+    "audio_streams": [
+      {
+        "index": 0,
+        "codec": "aac",
+        "channels": 1,
+        "channel_layout": "mono",
+        "sample_rate": 48000,
+        "language": "und",
+        "title": null
+      }
+    ]
+  },
+  "output_identity": {
+    "size": 4883901,
+    "mtime_ns": 1793607691818613521
+  },
+  "verified": true,
+  "verification": [
+    {
+      "step": "probe",
+      "ok": true
+    },
+    {
+      "step": "check",
+      "ok": true,
+      "platform": "tiktok"
+    },
+    {
+      "step": "loudness",
+      "ok": true,
+      "lufs": -13.95,
+      "tp": -5.61,
+      "target_lufs": -14.0,
+      "target_tp": -1.0,
+      "property": "loudness",
+      "expected": {
+        "lufs": -14.0,
+        "tp_max": -1.0
+      },
+      "measured": {
+        "lufs": -13.95,
+        "tp": -5.61
+      },
+      "delta": {
+        "lufs": 0.05,
+        "tp": -4.61
+      },
+      "tolerance": {
+        "lufs": 1.0,
+        "tp": 0.1
+      },
+      "provenance": "user_specified",
+      "stage": "loudness"
+    },
+    {
+      "step": "duration",
+      "property": "audio_duration",
+      "ok": true,
+      "expected": 12.0,
+      "measured": 12.0,
+      "delta": 0.0,
+      "tolerance": 0.03,
+      "provenance": "input_premeasurement",
+      "stage": "loudness"
+    },
+    {
+      "step": "loudness",
+      "ok": true,
+      "platform": "tiktok",
+      "property": "loudness",
+      "expected": {
+        "lufs": -14,
+        "tp_max": -1.0
+      },
+      "measured": {
+        "lufs": -13.95,
+        "tp": -1.81
+      },
+      "delta": {
+        "lufs": 0.05,
+        "tp": -0.81
+      },
+      "tolerance": {
+        "lufs": 2.0,
+        "tp": 0.1
+      },
+      "provenance": "specification",
+      "stage": "export"
+    },
+    {
+      "step": "duration",
+      "property": "duration",
+      "ok": true,
+      "expected": {
+        "max": 600.0
+      },
+      "measured": 12.0,
+      "delta": -588.0,
+      "tolerance": 0.0,
+      "provenance": "specification",
+      "stage": "export"
+    },
+    {
+      "step": "streams",
+      "property": "stream_inventory",
+      "expected": {
+        "video": true,
+        "audio": true
+      },
+      "measured": {
+        "video": true,
+        "audio": true
+      },
+      "expected_count": {
+        "video": 1,
+        "audio": 1
+      },
+      "measured_count": {
+        "video": 1,
+        "audio": 1
+      },
+      "provenance": "input_premeasurement",
+      "ok": true,
+      "stage": "export"
+    },
+    {
+      "step": "stream_lengths",
+      "property": "stream_end",
+      "measured": {
+        "video": 11.966667,
+        "audio": 12.0
+      },
+      "tolerance": 0.25,
+      "provenance": "input_premeasurement",
+      "ends": {
+        "video": 11.967,
+        "audio": 12.0
+      },
+      "shortfall": {
+        "video": 0.033,
+        "audio": 0.0
+      },
+      "input_shortfall": {
+        "video": 0.021,
+        "audio": 0.0
+      },
+      "ok": true,
+      "stage": "export"
+    },
+    {
+      "step": "decode",
+      "property": "decodable",
+      "frames": {
+        "video": {
+          "head": 30,
+          "tail": 30
+        },
+        "audio": {
+          "head": 47,
+          "tail": 48
+        }
+      },
+      "window": 1.0,
+      "provenance": "measurement",
+      "ok": true,
+      "stage": "export"
+    }
+  ],
+  "unverified": [
+    "picture_content",
+    "rendered_placement"
+  ],
+  "encoder": "libx264",
+  "stages": [
+    "clips",
+    "fit",
+    "captions",
+    "loudness",
+    "export",
+    "check"
+  ],
+  "check": {
+    "status": "completed",
+    "output": null,
+    "dry_run": false,
+    "commands": [
+      "/opt/homebrew/bin/ffmpeg -hide_banner -nostdin -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4' -vn -af loudnorm=I=-14:TP=-1:LRA=11:print_format=json -f null -"
+    ],
+    "verified": false,
+    "verification": [],
+    "platform": "tiktok",
+    "checks": [
+      {
+        "check": "duration",
+        "status": "PASS",
+        "value": "12.00s",
+        "expected": "<= 600s",
+        "fix": "decide with the user: cut.py keeps quality but drops content; fit.py --duration speeds up (audio pitch-preserved, motion faster)",
+        "reason": "",
+        "kind": "judgement"
+      },
+      {
+        "check": "aspect",
+        "status": "PASS",
+        "value": "9:16",
+        "expected": "9:16/1:1",
+        "fix": "fit.py --aspect 9:16 --fit pad (keeps everything, adds bars) or crop (fills the frame, loses the edges: check the subject with look.py)",
+        "reason": "",
+        "kind": "judgement"
+      },
+      {
+        "check": "resolution",
+        "status": "PASS",
+        "value": "1080x1920",
+        "expected": "short side >= 1080",
+        "fix": "upscaling will not add detail; re-export from the master",
+        "reason": "",
+        "kind": "judgement"
+      },
+      {
+        "check": "fps",
+        "status": "PASS",
+        "value": "30",
+        "expected": "<= 60",
+        "fix": "fit.py --fps 30 (drops half the frames of 60 fps motion; fine for talking heads, visible on sports/gaming)",
+        "reason": "",
+        "kind": "judgement"
+      },
+      {
+        "check": "vfr",
+        "status": "PASS",
+        "value": "constant",
+        "expected": "constant",
+        "fix": "fit.py --fps N (any re-encode conforms it)",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "video codec",
+        "status": "PASS",
+        "value": "h264",
+        "expected": "h264/hevc",
+        "fix": "export.py --preset tiktok",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "pixel format",
+        "status": "PASS",
+        "value": "yuv420p",
+        "expected": "yuv420p (8-bit 4:2:0)",
+        "fix": "export.py preset re-encodes to yuv420p",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "colour",
+        "status": "PASS",
+        "value": "bt709/bt709",
+        "expected": "bt709/bt709 tagged (or HDR)",
+        "fix": "",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "file size",
+        "status": "PASS",
+        "value": "4.7 MB",
+        "expected": "<= 4096 MB",
+        "fix": "export.py --crf 24 or lower resolution",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "audio",
+        "status": "PASS",
+        "value": "aac 1ch 48000Hz",
+        "expected": "present",
+        "fix": "",
+        "reason": "",
+        "kind": "format"
+      },
+      {
+        "check": "subtitles",
+        "status": "WARN",
+        "value": "none",
+        "expected": ">= 1 language-tagged subtitle track",
+        "fix": "caption.py video.mp4 --mode mux --srt subs.srt:en -o video_subs.mkv (streams are copied)",
+        "reason": "subtitles are optional, but they are the cheapest accessibility win a delivery has",
+        "kind": "format"
+      },
+      {
+        "check": "loudness",
+        "status": "PASS",
+        "value": "-13.9 LUFS",
+        "expected": "-14 ± 2 LUFS",
+        "fix": "loudness.py -I -14 for speech or music; leave ambience/near-silence (<= -40 LUFS) alone and say so",
+        "reason": "",
+        "kind": "judgement"
+      },
+      {
+        "check": "true peak",
+        "status": "PASS",
+        "value": "-1.8 dBTP",
+        "expected": "<= -1 dBTP (+0.1 dB tolerance)",
+        "fix": "loudness.py --tp -1",
+        "reason": "",
+        "kind": "judgement"
+      }
+    ],
+    "failed": 0,
+    "warnings": 1,
+    "ok": true,
+    "input_identity": {
+      "size": 4883901,
+      "mtime_ns": 1793607691818613521
+    }
+  },
+  "snap": null,
+  "cache": null,
+  "caption": {
+    "shifted": 0,
+    "wrapped": 5,
+    "split": 0,
+    "extended": 0,
+    "dropped": 0,
+    "rebalanced": 3,
+    "wrap": "phrase",
+    "phrase_breaks": 3,
+    "fit_size": "on",
+    "size_requested": 24,
+    "size_used": 15,
+    "size_floor": 13,
+    "size_pct_height": 5.21,
+    "shrunk": 5,
+    "fit_scope": "file",
+    "fit_exhausted": false,
+    "size_source": "input",
+    "cues_burned": 4,
+    "cues_outside": 5,
+    "text_unchanged": true
+  },
+  "intermediate_preset": "superfast",
+  "notes": [
+    "caption: 5 cue(s) fall outside the video (0–12.0 s) and are not drawn",
+    "caption: emoji rendered monochrome (no colour path on this ffmpeg; --emoji-assets DIR for colour)"
+  ],
+  "diagnostics": {
+    "warnings": [
+      {
+        "code": "frame_from_export_preset",
+        "message": "frame: 1080x1920 from the tiktok export preset (captions and overlays are sized for delivery)",
+        "preset": "tiktok",
+        "width": 1080,
+        "height": 1920
+      },
+      {
+        "code": "emoji_monochrome",
+        "message": "emoji rendered monochrome (no colour path on this ffmpeg; --emoji-assets DIR for colour). Apple Color Emoji installed but libass renders it monochrome on this build",
+        "stage": "caption"
+      },
+      {
+        "code": "cues_outside_video",
+        "message": "5 cue(s) fall outside the video (0–12.0 s) and are not drawn",
+        "count": 5,
+        "duration": 12.0,
+        "stage": "caption"
+      }
+    ]
+  }
+}

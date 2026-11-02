@@ -1,0 +1,31 @@
+{
+  "status": "failed",
+  "exit_code": 1,
+  "error": {
+    "kind": "ffmpeg",
+    "message": "caption.py failed: command failed (234): /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg\n[AVFilterGraph @ 0x75e5040580] No option name near '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts'\n[AVFilterGraph @ 0x75e5040580] Error parsing a filter description around: \n[AVFilterGraph @ 0x75e5040580] Error parsing filterchain 'ass=/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts' around: \nError opening output file /private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.mp4.\nError opening output files: Invalid argument",
+    "code": "FFMPEG_EXECUTION_FAILED",
+    "retryable": false
+  },
+  "commands": [
+    "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/話す clip 🎤.mp4' -vf 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(in_w-out_w)*0.5:(in_h-out_h)*0.5,setsar=1' -map 0:v:0 -map 0:a:0 -c:v libx264 -preset superfast -crf 18 -pix_fmt yuv420p -movflags +faststart -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -c:a aac -b:a 192k -map '0:s?' -map '0:d?' -c:s copy -c:d copy '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/fit.mp4'",
+    "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-path/ffmpeg -hide_banner -loglevel error -nostdin -y -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/fit.mp4' -map 0:v:0 -vf 'ass=/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.ass:fontsdir=/Library/Fonts' -map 0:a:0 -c:v libx264 -preset superfast -crf 18 -pix_fmt yuv420p -movflags +faststart -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -c:a aac -b:a 192k '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/lean-direct 直接 📂/tiktok 縦_work_17872/captioned.mp4'"
+  ],
+  "stage": "caption.py",
+  "diagnostics": {
+    "warnings": [
+      {
+        "code": "frame_from_export_preset",
+        "message": "frame: 1080x1920 from the tiktok export preset (captions and overlays are sized for delivery)",
+        "preset": "tiktok",
+        "width": 1080,
+        "height": 1920
+      },
+      {
+        "code": "emoji_monochrome",
+        "message": "emoji rendered monochrome (no colour path on this ffmpeg; --emoji-assets DIR for colour). Apple Color Emoji installed; the colour render probe was not run",
+        "stage": "caption"
+      }
+    ]
+  }
+}

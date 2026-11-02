@@ -1,0 +1,73 @@
+{
+  "status": "completed",
+  "output": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/sheet シート.png",
+  "dry_run": false,
+  "commands": [
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -ss 0.500000 -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/tiktok 縦.mp4' -vf 'select='\\''isnan(prev_selected_t)+gte(t-prev_selected_t\\,0.980000)'\\'',scale=320:-2,drawtext=text='\\''%{pts\\:hms\\:0.500000}'\\'':fontfile=/Users/rymalia/Library/Fonts/DejaVuSans.ttf:fontcolor=white:fontsize=h/18:box=1:boxcolor=black@0.55:boxborderw=6:x=8:y=8,tile=4x3:padding=2:margin=2:color=0x202020' -frames:v 1 '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/sheet シート.png'"
+  ],
+  "probe": {
+    "file": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/sheet シート.png",
+    "format": "png_pipe",
+    "duration": null,
+    "start_time": null,
+    "size_bytes": 352577,
+    "bitrate": null,
+    "video": {
+      "codec": "png",
+      "profile": null,
+      "width": 1290,
+      "height": 1712,
+      "display_aspect": "82431:109568",
+      "fps": 25.0,
+      "r_frame_rate": "25/1",
+      "avg_frame_rate": "25/1",
+      "variable_frame_rate_suspected": false,
+      "pix_fmt": "rgb24",
+      "bit_depth": 8,
+      "hdr": false,
+      "hdr_signal": false,
+      "bt2020_or_hdr": false,
+      "hdr_format": null,
+      "dolby_vision": null,
+      "color_space": "gbr",
+      "color_primaries": "bt709",
+      "color_transfer": "bt709",
+      "color_range": "pc",
+      "rotation": 0,
+      "nb_frames": null,
+      "duration": null,
+      "tagged_duration": null,
+      "start_time": null,
+      "bitrate": null
+    },
+    "audio": null,
+    "subtitle_streams": 0,
+    "data_streams": 0,
+    "stream_counts": {
+      "video": 1,
+      "audio": 0
+    },
+    "chapters": [],
+    "tags": {},
+    "timecode": {
+      "value": null,
+      "drop_frame": null,
+      "source": null
+    },
+    "subtitle_stream_details": []
+  },
+  "output_identity": {
+    "size": 352577,
+    "mtime_ns": 1793607693559282270
+  },
+  "verified": true,
+  "verification": [
+    {
+      "step": "probe",
+      "ok": true
+    }
+  ],
+  "outputs": [
+    "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/sheet シート.png"
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "status": "completed",
+  "output": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/cut 切り取り.mp4",
+  "dry_run": false,
+  "commands": [
+    "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -nostdin -y -ss 0.200000 -i '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/日本語 テスト 🎬/iPhone 撮影 📱.MOV' -t 1.300000 -c copy -movflags +faststart '/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/cut 切り取り.mp4'"
+  ],
+  "probe": {
+    "file": "/private/tmp/claude-501/-Users-rymalia-projects-ffmpeg-skill/6ac5e57c-7a5b-46ca-aa04-32b2f830ea26/scratchpad/r143/direct 直接 📂/cut 切り取り.mp4",
+    "format": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": 1.351667,
+    "start_time": 0.0,
+    "size_bytes": 3910180,
+    "bitrate": 23142859,
+    "video": {
+      "codec": "hevc",
+      "profile": "Main 10",
+      "width": 1920,
+      "height": 1080,
+      "display_aspect": "16:9",
+      "fps": 59.935,
+      "r_frame_rate": "60000/1001",
+      "avg_frame_rate": "18400/307",
+      "variable_frame_rate_suspected": false,
+      "pix_fmt": "yuv420p10le",
+      "bit_depth": 10,
+      "hdr": true,
+      "hdr_signal": true,
+      "bt2020_or_hdr": true,
+      "hdr_format": "HLG",
+      "dolby_vision": null,
+      "color_space": "bt2020nc",
+      "color_primaries": "bt2020",
+      "color_transfer": "arib-std-b67",
+      "color_range": "tv",
+      "rotation": -90,
+      "nb_frames": 92,
+      "duration": 1.351667,
+      "tagged_duration": null,
+      "start_time": 0.0,
+      "bitrate": 20178986
+    },
+    "audio": {
+      "codec": "aac",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "sample_rate": 48000,
+      "bitrate": 175797,
+      "duration": 1.313333,
+      "start_time": 0.0,
+      "tagged_duration": null
+    },
+    "subtitle_streams": 0,
+    "data_streams": 0,
+    "stream_counts": {
+      "video": 1,
+      "audio": 1
+    },
+    "chapters": [],
+    "tags": {},
+    "timecode": {
+      "value": null,
+      "drop_frame": null,
+      "source": null
+    },
+    "subtitle_stream_details": [],
+    "audio_streams": [
+      {
+        "index": 0,
+        "codec": "aac",
+        "channels": 2,
+        "channel_layout": "stereo",
+        "sample_rate": 48000,
+        "language": "und",
+        "title": null
+      }
+    ]
+  },
+  "output_identity": {
+    "size": 3910180,
+    "mtime_ns": 1793607673930206466
+  },
+  "verified": true,
+  "verification": [
+    {
+      "step": "probe",
+      "ok": true
+    },
+    {
+      "step": "streams",
+      "property": "stream_inventory",
+      "expected": {
+        "video": true,
+        "audio": true
+      },
+      "measured": {
+        "video": true,
+        "audio": true
+      },
+      "expected_count": {
+        "video": 1,
+        "audio": 1
+      },
+      "measured_count": {
+        "video": 1,
+        "audio": 1
+      },
+      "provenance": "input_premeasurement",
+      "ok": true
+    },
+    {
+      "step": "stream_lengths",
+      "property": "stream_end",
+      "measured": {
+        "video": 1.351667,
+        "audio": 1.313333
+      },
+      "tolerance": 0.25,
+      "provenance": "input_premeasurement",
+      "ends": {
+        "video": 1.352,
+        "audio": 1.313
+      },
+      "shortfall": {
+        "video": 0.0,
+        "audio": 0.038
+      },
+      "input_shortfall": {
+        "video": 0.0,
+        "audio": 0.0
+      },
+      "ok": true
+    },
+    {
+      "step": "decode",
+      "property": "decodable",
+      "frames": {
+        "video": {
+          "head": 60,
+          "tail": 59
+        },
+        "audio": {
+          "head": 48,
+          "tail": 47
+        }
+      },
+      "window": 1.0,
+      "provenance": "measurement",
+      "ok": true
+    }
+  ],
+  "unverified": [
+    "picture_content"
+  ],
+  "encoder": "copy",
+  "expected_duration": 1.3,
+  "duration_error_ms": 51.667,
+  "precision": "packet",
+  "reencoded": false,
+  "dropped_non_av_streams": false,
+  "requested_start": 0.2,
+  "requested_end": 1.5,
+  "requested_segments": null,
+  "requested_duration": 1.3,
+  "output_duration": 1.351667,
+  "duration_delta_seconds": 0.051667,
+  "mode": "copy",
+  "keyframe_snapped": false,
+  "start_snapped": false,
+  "reencode_reason": [],
+  "least_exact_precision": "packet",
+  "segment_precision": null,
+  "edit_list": true,
+  "stored_preroll_seconds": 0.2,
+  "av_start_skew_seconds": 0.0,
+  "join_check": null,
+  "segment_end_snap_seconds": null,
+  "declick_ms": null,
+  "notes": [
+    "0.200s of pre-roll is stored, hidden by the MP4 edit list; a player or tool that ignores edit lists will show it"
+  ],
+  "vfr_check": {
+    "heuristic": true,
+    "measured": "sampled_cfr",
+    "windows": 1,
+    "deltas": 99,
+    "method": "sampled",
+    "guard": "sampled"
+  },
+  "nearest_keyframes": null,
+  "lossless_alternative": null,
+  "snap": null
+}
