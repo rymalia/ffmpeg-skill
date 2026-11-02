@@ -19,6 +19,10 @@ import os
 import re
 import sys
 
+from _platforms import TP_TOLERANCE_DB
+
+AUDIO_LENGTH_TOLERANCE = 0.03  # seconds: one AAC frame at 48 kHz is 0.021 s
+LUFS_TOLERANCE = 1.0  # LU: a normalised file within this of the requested -I is on target
 from _common import STATE, add_common, apply_common, emit, AUDIO_CODECS, audio_codec_for, default_output, die, ffmpeg_base, info, probe, require_tool, run, run_analysis, run_keeping_subtitles, dry_run_input_pending
 
 
@@ -92,6 +96,12 @@ def main() -> int:
     bitrate = args.audio_bitrate or "192k"
 
     dropped_streams = False
+    # loudnorm emits its last block whole, and through the AAC encoder that came out as 0.1 s more
+    # sound than the input had (a 90.000 s Reels export left at 90.100 s, which check.py fails):
+    # the sound is trimmed back to the input's own length. `duration=` counts from the first sample,
+    # so sound that starts late keeps its end (`end=` is a timestamp, and cut it). atrim follows
+    # loudnorm directly: an aresample between them fails channel-layout negotiation on FFmpeg 5.1
+    in_audio = audio_length(meta)
 
     def encode(tp: float, bitrate: str) -> None:
         nonlocal dropped_streams
@@ -100,6 +110,8 @@ def main() -> int:
             f":measured_I={stats['input_i']}:measured_TP={stats['input_tp']}:measured_LRA={stats['input_lra']}"
             f":measured_thresh={stats['input_thresh']}:offset={stats['target_offset']}:linear=true:print_format=summary"
         )
+        if in_audio:
+            af += f",atrim=duration={float(in_audio):.6f}"
         cmd = ffmpeg_base() + ["-i", args.input, "-af", af, "-ar", str(sr)]
         if ext in AUDIO_CODECS or not meta.get("video"):
             cmd += ["-vn"] + audio_codec_for(output, bitrate)
@@ -128,7 +140,7 @@ def main() -> int:
     # integrated loudness -- reported, never hidden.
     ceiling, rounds = args.tp, 0
     steps = [] if bitrate_pinned or ext in AUDIO_CODECS and "aac" not in AUDIO_CODECS[ext] else [b for b in ("256k", "320k") if _kbps(b) > _kbps(bitrate)]
-    while not after.get("silent") and float(after["input_tp"]) > args.tp + 0.1 and rounds < 5:
+    while not after.get("silent") and float(after["input_tp"]) > args.tp + TP_TOLERANCE_DB and rounds < 5:
         rounds += 1
         overshoot = float(after["input_tp"]) - args.tp
         if steps:
@@ -148,22 +160,47 @@ def main() -> int:
     if ext not in AUDIO_CODECS or "aac" in AUDIO_CODECS[ext]:
         result["audio_bitrate_used"] = bitrate
     result["encodes"] = rounds + 1
-    if not after.get("silent") and abs(float(after["input_i"]) - args.lufs) > 1.0:
+    if not after.get("silent") and abs(float(after["input_i"]) - args.lufs) > LUFS_TOLERANCE:
         result["note"] = (f"integrated loudness is {float(after['input_i']) - args.lufs:+.1f} LU from the target because the "
                           f"true-peak ceiling had to absorb the encoder's overshoot; a lossless delivery (wav/flac) or a pinned "
                           f"higher --audio-bitrate keeps both")
-    if not after.get("silent") and float(after["input_tp"]) > args.tp + 0.1:
+    if not after.get("silent") and float(after["input_tp"]) > args.tp + TP_TOLERANCE_DB:
         die(f"true peak is still {float(after['input_tp']):.2f} dBTP after {rounds + 1} encodes (requested <= {args.tp:g}); "
             f"the encoder overshoots more than the loudnorm ceiling can absorb at this bitrate",
             kind="verification", output=output, result=result,
             hint="raise --audio-bitrate (e.g. 256k) or deliver a lossless format (wav/flac) and let the platform encode")
+    verification = [{"step": "loudness",
+                     "ok": bool(after.get("silent")) or (abs(float(after["input_i"]) - args.lufs) <= LUFS_TOLERANCE and float(after["input_tp"]) <= args.tp + TP_TOLERANCE_DB),
+                     "lufs": float(after["input_i"]), "tp": float(after["input_tp"]), "target_lufs": args.lufs, "target_tp": args.tp,
+                     "property": "loudness", "expected": {"lufs": args.lufs, "tp_max": args.tp},
+                     "measured": {"lufs": float(after["input_i"]), "tp": float(after["input_tp"])},
+                     "delta": {"lufs": round(float(after["input_i"]) - args.lufs, 2), "tp": round(float(after["input_tp"]) - args.tp, 2)},
+                     "tolerance": {"lufs": LUFS_TOLERANCE, "tp": TP_TOLERANCE_DB}, "provenance": "user_specified"}]
+    written = probe(output, role="output")
+    out_audio = audio_length(written)
+    if in_audio and out_audio:
+        # a levels pass changes no timing: the sound is as long as the input's, to one AAC frame
+        tol = max(1024.0 / float(sr), AUDIO_LENGTH_TOLERANCE)
+        verification.append({"step": "duration", "property": "audio_duration", "ok": abs(out_audio - in_audio) <= tol,
+                             "expected": round(float(in_audio), 3), "measured": round(float(out_audio), 3),
+                             "delta": round(float(out_audio) - float(in_audio), 3), "tolerance": round(tol, 3),
+                             "provenance": "input_premeasurement"})
+    else:
+        # a length that could not be read is not a length that matched
+        verification.append({"step": "duration", "property": "audio_duration", "ok": False,
+                             "reason": "not_measured: the " + ("input" if not in_audio else "output") + " reports no duration"})
     emit(output, result=result, dropped_non_av_streams=dropped_streams,
          measured={k: stats[k] for k in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset", "silent")},
-         targets={"lufs": args.lufs, "tp": args.tp, "lra": args.lra},
-         verification=[{"step": "loudness",
-                        "ok": bool(after.get("silent")) or (abs(float(after["input_i"]) - args.lufs) <= 1.0 and float(after["input_tp"]) <= args.tp + 0.1),
-                        "lufs": float(after["input_i"]), "tp": float(after["input_tp"]), "target_lufs": args.lufs, "target_tp": args.tp}])
+         targets={"lufs": args.lufs, "tp": args.tp, "lra": args.lra}, verification=verification)
     return 0
+
+
+def audio_length(meta: dict) -> "Optional[float]":
+    """The sound's own length: the stream's duration, else Matroska's DURATION tag. Never the
+    container's, which is the picture's when the picture runs longer (and would fail a correct
+    output against an expected length the sound never had)."""
+    audio = meta.get("audio") or {}
+    return audio.get("duration") or audio.get("tagged_duration")
 
 
 def _kbps(value: str) -> int:

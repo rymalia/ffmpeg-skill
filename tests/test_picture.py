@@ -1078,6 +1078,65 @@ class PictureTests(MediaFixtures):
         script("overlay.py", self.src, "--text", "Episode 12", "--position", "bottom", "--box", "--start", "1", "--end", "5", "--fade", "0.3", "-o", out2)
         self.assertClose(probe(str(out2))["duration"], 12.0, 0.15)
 
+    def _gray_clip(self, name):
+        clip = OUT / name
+        if not clip.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x404040:s=640x360:r=10",
+               "-t", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0", "-pix_fmt", "yuv420p", clip)
+        return clip
+
+    @staticmethod
+    def _gray_frame(path):
+        return subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                              stdout=subprocess.PIPE, check=True).stdout
+
+    def test_overlay_multi_line_text_draws_no_box_at_the_line_break(self):
+        """FFmpeg 8.0, 8.0.1 and 8.1.0 shape every line of a multi-line drawtext but the last WITH
+        its newline, so the font's missing-glyph box was drawn after the line (PR #346 only
+        warned). On those releases overlay.py draws each line with its own drawtext; on every
+        build, nothing may be drawn to the right of a short first line inside the block."""
+        clip, font = self._gray_clip("ov_nl_gray.mp4"), default_font_file("DejaVu Sans")
+        common = ("--position", "top-left", "--font-color", "white", "--border", "0", "--quality", "0", "--preset", "ultrafast")
+        if font:
+            common += ("--font-file", font)
+        one, two = OUT / "ov_nl_one.mp4", OUT / "ov_nl_two.mp4"
+        script("overlay.py", clip, "--text", "Hi", *common, "-o", one)
+        script("overlay.py", clip, "--text", "Hi\nmuch longer second line", *common, "-o", two)
+        a, b, w = self._gray_frame(one), self._gray_frame(two), 640
+        ink = lambda f, x, y: f[y * w + x] > 0x40 + 60  # noqa: E731
+        rows = [y for y in range(360) if any(ink(a, x, y) for x in range(w))]
+        right = max(x for x in range(w) for y in rows if ink(a, x, y))
+        stray = [(x, y) for y in rows for x in range(right + 3, w) if ink(b, x, y)]
+        self.assertEqual(stray, [], "ink after the first line: the line break was drawn")
+
+    @unittest.skipIf(platform.system() == "Windows", "the release shim is a #!/bin/sh ffprobe on a POSIX-only PATH")
+    def test_overlay_per_line_route_draws_what_one_multi_line_drawtext_draws(self):
+        """The per-line route (taken on 8.0/8.0.1/8.1.0, forced here by an ffprobe that reports
+        8.0.1) must put every line where one multi-line drawtext puts it on a fixed release:
+        widest line, first line's ascent, last line's descent, the font's line height, block box
+        and outlines included. Runs where drawtext is right (6.1+, not an affected release), so
+        the single drawtext is the reference."""
+        import _common
+        if _common.drawtext_draws_newline_glyph():
+            self.skipTest("needs a drawtext that draws multi-line text right")
+        shim = OUT / "ov_nl_shim"
+        shim.mkdir(exist_ok=True)
+        (shim / "ffprobe").write_text("#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'ffprobe version 8.0.1\\n'; exit 0; fi\n"
+                                      "exec %s \"$@\"\n" % shutil.which("ffprobe"))
+        (shim / "ffprobe").chmod(0o755)
+        bad = dict(os.environ, PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
+        clip, font = self._gray_clip("ov_nl_gray.mp4"), default_font_file("DejaVu Sans")
+        for pos, extra in (("center", ("--box",)), ("bottom-right", ()), ("top", ("--box", "--border", "0"))):
+            args = ["--text", "Hello there\ngjy World wide\nÉg", "--position", pos, "--quality", "0", "--preset", "ultrafast", *extra]
+            if font:
+                args += ["--font-file", font]
+            ref, per = OUT / f"ov_nl_ref_{pos}.mp4", OUT / f"ov_nl_per_{pos}.mp4"
+            script("overlay.py", clip, *args, "-o", ref)
+            doc = json.loads(script("overlay.py", clip, *args, "-o", per, "--json", env=bad).stdout)
+            self.assertEqual(doc["commands"][-1].count("drawtext="), 6 if "0" not in extra else 3, pos)
+            self.assertNotIn("notes", doc)
+            self.assertEqual(self._gray_frame(ref), self._gray_frame(per), pos)
+
     def test_overlay_text_scale_is_refused(self):
         """--scale is a layer width. On --text it used to be accepted and ignored, so the draw
         stayed at fontsize 42 while the result said completed."""
@@ -1103,6 +1162,17 @@ class PictureTests(MediaFixtures):
         self.assertEqual((v["width"], v["height"]), (1920, 1080))
         # refuses on SDR input unless forced
         script("color.py", self.src, "--to-sdr", expect_fail=True)
+
+    def test_every_tonemap_choice_is_a_curve_this_ffmpeg_has(self):
+        """2.24: --tonemap offered bt2390, which FFmpeg's CPU tonemap filter has never had (only
+        tonemap_opencl/libplacebo do), so choosing it always failed. Every choice must be one of
+        the filter's own curves on the ffmpeg under test."""
+        import color
+        help_text = sh("ffmpeg", "-hide_banner", "-h", "filter=tonemap").stdout
+        curves = set(re.findall(r"^\s{5}(\w+)\s+\d+\s", help_text, re.M))
+        self.assertTrue(curves, help_text)
+        self.assertEqual(set(color.TONEMAPS) - curves, set(), help_text)
+        script("color.py", self.hdr, "--to-sdr", "--tonemap", "bt2390", "-o", OUT / "sdr_bt2390.mp4", expect_fail=True)
 
     def test_to_sdr_bt2020_sdr_converts_gamut_without_tonemap(self):
         """BT.2020 primaries on an SDR transfer are not HDR: --to-sdr converts the gamut only.
@@ -1136,6 +1206,76 @@ class PictureTests(MediaFixtures):
         proc = script("color.py", self.src, "--retag", "bt601", "-o", out)
         self.assertIn("-c copy", proc.stderr)
         self.assertEqual(probe(str(out))["video"]["color_transfer"], "smpte170m")
+
+    def _tagged(self, name, codec, params):
+        src = OUT / name
+        if not src.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10",
+               "-t", "1", "-c:v", codec, "-preset", "ultrafast", "-pix_fmt", "yuv420p", *params, src)
+        return src
+
+    @staticmethod
+    def _tags(path):
+        v = probe(str(path))["video"]
+        return v["color_space"], v["color_primaries"], v["color_transfer"]
+
+    @staticmethod
+    def _frame_tags(path):
+        """What the decoder hands a player: from 8.1 ffprobe's stream tags follow the container's
+        colr even while an H.264 VUI still says otherwise."""
+        keys = ("color_space", "color_primaries", "color_transfer")
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_frames", "-read_intervals", "%+#1",
+                              "-show_entries", "frame=" + ",".join(keys), "-of", "json", str(path)],
+                             stdout=subprocess.PIPE, text=True, check=True).stdout
+        frame = json.loads(out)["frames"][0]
+        return tuple(frame.get(k) for k in keys)
+
+    @staticmethod
+    def _pixels(path):
+        out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "framemd5", "-"],
+                              stdout=subprocess.PIPE, text=True, check=True).stdout
+        return [line for line in out.splitlines() if not line.startswith("#")]
+
+    def test_color_retag_rewrites_the_tags_the_stream_itself_carries(self):
+        """H.264/HEVC carry their colour description in the SPS VUI, which every decoder reads
+        before the container: --retag used to stream-copy with -colorspace/-color_primaries/
+        -color_trc (container only), report completed, and ffprobe still read the old tags. The
+        copy now rewrites the VUI with h264_metadata/hevc_metadata, stays a copy (same decoded
+        frames) and checks the tags it claims."""
+        sources = [self._tagged("rt_h264_709.mp4", "libx264", ["-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709"])]
+        if "libx265" in __import__("_common").ffmpeg_encoders():
+            sources.append(self._tagged("rt_hevc_709.mp4", "libx265",
+                                        ["-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error"]))
+        for src in sources:
+            self.assertEqual(self._tags(src), ("bt709", "bt709", "bt709"))
+            for target, want in (("bt601", ("smpte170m", "smpte170m", "smpte170m")),
+                                 ("bt2020-hlg", ("bt2020nc", "bt2020", "arib-std-b67"))):
+                out = OUT / f"rt_{src.stem}_{target}.mp4"
+                doc = json.loads(script("color.py", src, "--retag", target, "-o", out, "--json").stdout)
+                self.assertEqual(self._tags(out), want, f"{src.name} -> {target}")
+                self.assertEqual(self._frame_tags(out), want, f"{src.name} -> {target}: decoded frames")
+                self.assertFalse(doc["reencoded"], src.name)
+                self.assertIn("_metadata=", doc["commands"][0])
+                self.assertEqual(self._pixels(out), self._pixels(src), "a retag must not touch a picture")
+
+    def test_color_retag_reencode_fallback_labels_the_frames(self):
+        """When a copy cannot carry the tags (forced here by taking the bitstream filter away), the
+        re-encode puts them on the frames with setparams. Its output options used to do it: from
+        FFmpeg 7.1 those feed the graph's colourspace negotiation, which converted the matrix of a
+        tagged source and kept its primaries and transfer (8.0.1, 8.1.3: bt709 in, smpte170m/
+        bt709/bt709 out). The result says it re-encoded and why."""
+        src = self._tagged("rt_h264_709.mp4", "libx264", ["-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709"])
+        out = OUT / "rt_fallback_bt601.mp4"
+        code = ("import sys; sys.path.insert(0, %r); import color; color.retag_bsf = lambda meta, target: []; "
+                "sys.argv = ['color.py', %r, '--retag', 'bt601', '-o', %r, '--json', '--overwrite', '--quality', '0', "
+                "'--preset', 'ultrafast']; sys.exit(color.main())" % (str(SCRIPTS), str(src), str(out)))
+        doc = json.loads(sh(sys.executable, "-c", code).stdout)
+        self.assertTrue(doc["reencoded"])
+        self.assertTrue(any("re-encoded with the tags on its frames" in n for n in doc["notes"]), doc.get("notes"))
+        self.assertIn("setparams=color_primaries=smpte170m:color_trc=smpte170m:colorspace=smpte170m", doc["commands"][-1])
+        self.assertNotIn("-colorspace", doc["commands"][-1])
+        self.assertEqual(self._tags(out), ("smpte170m", "smpte170m", "smpte170m"))
+        self.assertEqual(self._frame_tags(out), ("smpte170m", "smpte170m", "smpte170m"))
 
     def test_color_audio_stream_selects_the_requested_track_not_always_the_first(self):
         two = OUT / "color_two_streams.mkv"
@@ -1973,6 +2113,88 @@ class PictureTests(MediaFixtures):
         self.assertGreater(px(out, 10, 10)[0], 100, "keyed-out green should show the red background through it")
         self.assertGreater(min(px(out, 45, 45)), 100, "the white square inside the green should be unaffected")
 
+    def test_overlay_place_lays_layer_ranges_at_their_times(self):
+        """--place SRC_START-SRC_END@AT shows only that range of the layer, from AT on the main
+        timeline, and the main picture untouched elsewhere: a 4 s layer whose first half is blue and
+        second half green, placed 2-3@1 (green at 1-2 s) and 0-1@4 (blue at 4-5 s) on a 6 s red main."""
+        main = OUT / "place_main.mp4"
+        layer = OUT / "place_layer.mov"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=6",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", main)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2",
+           "-f", "lavfi", "-i", "color=c=0x00ff00:s=160x90:r=30:d=2", "-filter_complex", "[0][1]concat=n=2:v=1:a=0",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", layer)
+        out = OUT / "placed.mp4"
+        doc = json.loads(script("overlay.py", main, "--video", layer, "--position", "0,0", "--margin", "0",
+                                "--place", "2-3@1", "--place", "0-1@4", "--json", "-o", out).stdout)
+        self.assertEqual(doc["status"], "completed")
+        self.assertAlmostEqual(probe(str(out))["duration"], 6.0, delta=0.1)
+
+        def rgb_at(t):
+            r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(t), "-i", str(out),
+                                "-vf", "crop=4:4:40:40", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return tuple(r.stdout[:3])
+
+        def dominant(t):
+            return "rgb"[max(range(3), key=lambda i: rgb_at(t)[i])]
+
+        self.assertEqual([dominant(t) for t in (0.5, 1.5, 2.5, 4.5, 5.5)], ["r", "g", "r", "b", "r"])
+
+    def test_overlay_place_counts_from_the_layer_s_first_picture(self):
+        """A layer whose video starts a second after its audio (and so after the file's 0): `0-1`
+        is its first second of picture, not the second of silence before it."""
+        main = OUT / "place_late_main.mp4"
+        layer = OUT / "place_late_layer.mkv"   # Matroska keeps the late start (an MP4 edit list would hide it)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=4",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", main)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=d=3", "-vf", "setpts=PTS+1/TB",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", layer)
+        out = OUT / "place_late.mp4"
+        script("overlay.py", main, "--video", layer, "--position", "0,0", "--margin", "0",
+               "--place", "0-1@1", "-o", out)
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", "1.5", "-i", str(out),
+                            "-vf", "crop=4:4:40:40", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertGreater(r.stdout[2], r.stdout[0], "the layer's first second (blue) should show at 1-2 s")
+
+    def test_overlay_place_refusals(self):
+        layer = OUT / "place_ref_layer.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=30:d=2",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", layer)
+        long_audio = OUT / "place_ref_long_audio.mp4"   # 2 s of picture, 4 s of sound
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=d=4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", long_audio)
+        for args in (["--video", layer, "--place", "0-1@1", "--place", "0.5-1.5@1.5"],
+                     ["--video", long_audio, "--place", "0-3@0"],                         # past the layer's picture   # overlap on the main timeline
+                     ["--video", layer, "--place", "0-5@0"],                              # past the layer's end
+                     ["--video", layer, "--place", "2-2.01@1"],                           # starts at the layer's end
+                     ["--video", layer, "--place", "0-2.04@0"],                           # 0.04 s past it: over half a frame
+                     ["--video", layer, "--place", "1-0.5@0"],                            # backwards range
+                     ["--video", layer, "--place", "0-1"],                                # no @AT
+                     ["--video", layer, "--place", "0-1@0", "--start", "1"],              # with --start
+                     ["--image", self.logo, "--place", "0-1@0"]):                         # without --video
+            with self.subTest(args=args):
+                proc = script("overlay.py", self.src, *args, "--json", "-o", OUT / "place_ref.mp4", expect_fail=True)
+                self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+
+    def test_overlay_place_timecodes_count_each_timeline_s_frames(self):
+        """SRC_START/SRC_END are layer positions, so hh:mm:ss:ff there counts the layer's frames;
+        AT counts the main video's. An @fps suffix in any of the three names its rate explicitly."""
+        layer = OUT / "place_24.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=24:d=3",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", layer)
+        main_fps = probe(str(self.src))["video"]["fps"]
+        for spec, want in (("00:00:00:12-00:00:01:00@00:00:00:00", "trim=start=0.500000:end=1.000000"),
+                           ("00:00:00:12@25-2@1", "trim=start=0.480000:end=2.000000"),
+                           ("0-1@00:00:00:15@30", "setpts=PTS-STARTPTS+0.500000/TB")):
+            with self.subTest(spec=spec):
+                doc = json.loads(script("overlay.py", self.src, "--video", layer, "--place", spec, "--dry-run",
+                                        "--json", "-o", OUT / "place_tc.mp4").stdout)
+                self.assertIn(want, doc["commands"][0])
+        self.assertNotEqual(round(main_fps), 24, "the main fixture must not share the layer's rate")
+
     def test_overlay_chromakey_without_video_refused(self):
         script("overlay.py", self.src, "--chromakey", "green", expect_fail=True)
 
@@ -2021,7 +2243,7 @@ class PictureTests(MediaFixtures):
         def fake_run(cmd, **kw):
             return subprocess.CompletedProcess(cmd, 0, line, "")
 
-        with unittest.mock.patch("shutil.which", return_value="fc-list"), \
+        with unittest.mock.patch("shutil.which", return_value="/usr/bin/fc-list"), \
                 unittest.mock.patch("subprocess.run", side_effect=fake_run):
             family, path, answered = emoji_mod._emoji_color_font()
         self.assertEqual((family, path, answered), ("Noto Color Emoji", str(real), True))
@@ -3025,6 +3247,154 @@ class WindowsNirmalaTests(unittest.TestCase):
                     self.assertEqual(fonts.script_font_status("hi"), "missing")
 
 
+class WindowsFontPathTests(unittest.TestCase):
+    """drawtext hands fontfile= to FreeType, which opens it with the ANSI fopen on Windows: on the
+    gyan.dev 9.0.2 runner a font under `compat dir ünïcode` failed to load while the same file
+    under an ASCII directory loaded (measured on PR #365's CI). A non-ASCII path is given in its
+    8.3 short form, or copied to an ASCII name when the volume keeps no short names."""
+
+    def setUp(self):
+        import _common.drawtext as dt
+        self.dt = dt
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.font = self.tmp / "フォント" / "my font.ttf"
+        self.font.parent.mkdir()
+        self.font.write_bytes(b"font bytes")
+
+    def test_posix_and_ascii_paths_pass_through(self):
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=False):
+            self.assertIn("フォント", self.dt.drawtext_fontfile(str(self.font)))
+        ascii_font = self.tmp / "my font.ttf"
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=True):
+            self.assertEqual(self.dt.drawtext_fontfile(str(ascii_font)),
+                             "fontfile=" + self.dt.escape_filter_path(str(ascii_font), bind=False))
+
+    def test_windows_non_ascii_path_uses_the_short_form(self):
+        short = "C:/Users/TARO~1/FONT~1/MYFONT~1.TTF"
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=True), \
+                unittest.mock.patch.object(self.dt, "_windows_short_path", return_value=short):
+            self.assertEqual(self.dt.drawtext_fontfile(str(self.font)),
+                             "fontfile=" + self.dt.escape_filter_path(short, bind=False))
+
+    def test_windows_without_short_names_draws_from_an_ascii_copy(self):
+        from _common import STATE
+        before = len(STATE.fallbacks)
+        tmpdir = self.tmp / "run"
+        tmpdir.mkdir()
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=True), \
+                unittest.mock.patch.object(self.dt, "_windows_short_path", return_value=None), \
+                unittest.mock.patch.object(self.dt, "_drawtext_tmpdir", return_value=str(tmpdir)):
+            opt = self.dt.drawtext_fontfile(str(self.font))
+        copies = list(tmpdir.iterdir())
+        self.assertEqual(len(copies), 1)
+        self.assertTrue(copies[0].name.isascii() and copies[0].suffix == ".ttf")
+        self.assertEqual(copies[0].read_bytes(), b"font bytes")
+        self.assertIn(copies[0].name, opt)
+        self.assertIn(str(self.font), STATE.plan_inputs, "a plan binds the user's font, not the copy")
+        self.assertIn("font_path_copied", [f.get("code") for f in STATE.fallbacks[before:]])
+        # a font replaced in place gets a new copy, not the stale one
+        self.font.write_bytes(b"other font bytes")
+        os.utime(self.font, ns=(1, 1))
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=True), \
+                unittest.mock.patch.object(self.dt, "_windows_short_path", return_value=None), \
+                unittest.mock.patch.object(self.dt, "_drawtext_tmpdir", return_value=str(tmpdir)):
+            self.dt.drawtext_fontfile(str(self.font))
+        self.assertEqual(sorted(p.read_bytes() for p in tmpdir.iterdir()), [b"font bytes", b"other font bytes"])
+
+    def test_a_missing_font_is_left_to_ffmpeg_not_a_traceback(self):
+        missing = str(self.tmp / "フォント" / "nope.ttf")
+        with unittest.mock.patch.object(self.dt, "_on_windows", return_value=True), \
+                unittest.mock.patch.object(self.dt, "_windows_short_path", return_value=None):
+            self.assertEqual(self.dt.drawtext_fontfile(missing), "fontfile=" + self.dt.escape_filter_path(missing))
+
+
+class TraditionalChineseFontTests(unittest.TestCase):
+    """2.19: Han-only text resolved a Simplified face whatever --lang said, so a zh-TW caption was
+    drawn in the Beijing glyph forms. A --lang naming Traditional Chinese now resolves a
+    Traditional face, and falls back to the Simplified one, recorded, when none is installed."""
+
+    def tearDown(self):
+        import _common.fonts as fonts
+        fonts._SCRIPT_FONT_CACHE.clear()
+
+    def test_font_key_reads_traditional_tags_only(self):
+        import _common.fonts as fonts
+        for lang in ("zh-TW", "zh_hk", "zh-Hant", "zh-Hant-TW", "yue", "zh-MO"):
+            self.assertEqual(fonts.font_key("zh", lang), "zh-hant", lang)
+        for lang in (None, "", "zh", "zh-CN", "zh-Hans", "ja", "zh-twx"):
+            self.assertEqual(fonts.font_key("zh", lang), "zh", lang)
+        self.assertEqual(fonts.font_key("ja", "zh-TW"), "ja", "kana text stays Japanese")
+
+    def test_windows_picks_jhenghei_for_traditional_and_yahei_for_simplified(self):
+        import _common.fonts as fonts
+        fonts._SCRIPT_FONT_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "Fonts").mkdir()
+            for name in ("msyh.ttc", "msjh.ttc"):
+                (Path(tmp) / "Fonts" / name).write_bytes(b"existence is the check")
+            with unittest.mock.patch("platform.system", return_value="Windows"), \
+                    unittest.mock.patch.dict(os.environ, {"WINDIR": tmp}):
+                script, path, family = fonts.script_font_for_text("台灣的骨頭", lang="zh-TW")
+                self.assertEqual((script, family), ("zh", "Microsoft JhengHei"))
+                self.assertTrue(path.endswith("msjh.ttc"), path)
+                script, path, family = fonts.script_font_for_text("台湾的骨头")
+                self.assertEqual((script, family), ("zh", "Microsoft YaHei"))
+
+    def test_no_traditional_face_falls_back_to_simplified_and_says_so(self):
+        import _common.fonts as fonts
+        from _common import STATE
+        fonts._SCRIPT_FONT_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "Fonts").mkdir()
+            (Path(tmp) / "Fonts" / "msyh.ttc").write_bytes(b"ttc")
+            before = len(STATE.fallbacks)
+            with unittest.mock.patch("platform.system", return_value="Windows"), \
+                    unittest.mock.patch.dict(os.environ, {"WINDIR": tmp}):
+                script, path, family = fonts.script_font_for_text("台灣", lang="zh-TW")
+            self.assertTrue(path.endswith("msyh.ttc"), path)
+            self.assertEqual((script, family), ("zh", "Microsoft YaHei"))
+            codes = [f.get("code") for f in STATE.fallbacks[before:]]
+            self.assertIn("font_variant_missing", codes)
+
+    def _fc(self, by_lang):
+        import _common.fonts as fonts
+        fonts._SCRIPT_FONT_CACHE.clear()
+        asked = []
+
+        def fake(lang):
+            asked.append(lang)
+            return by_lang.get(lang, [])
+        return asked, unittest.mock.patch.multiple(fonts, _fc_list_fonts=fake), \
+            unittest.mock.patch("platform.system", return_value="Linux")
+
+    def test_fontconfig_asks_zh_tw_and_picks_the_traditional_family(self):
+        import _common.fonts as fonts
+        asked, fc, plat = self._fc({
+            # one .ttc lists every face it holds; the name returned is the one that ranked
+            "zh-tw": [("/f/NotoSansCJK-Regular.ttc", ["Noto Sans CJK JP", "Noto Sans CJK SC", "Noto Sans CJK TC"])],
+            "zh-cn": [("/f/NotoSansCJK-Regular.ttc", ["Noto Sans CJK SC"])]})
+        with fc, plat:
+            script, path, family = fonts.script_font_for_text("台灣", lang="zh-TW")
+        self.assertIn("zh-tw", asked)
+        self.assertEqual((script, family), ("zh", "Noto Sans CJK TC"))
+
+    def test_unifont_alone_for_traditional_does_not_block_the_simplified_face(self):
+        """fontconfig's Unifont "covers" zh-tw with code-point boxes; a real Simplified face
+        draws the characters, so it wins, and the swap is recorded."""
+        import _common.fonts as fonts
+        from _common import STATE
+        asked, fc, plat = self._fc({
+            "zh-tw": [("/f/unifont.otf", ["Unifont"])],
+            "zh-cn": [("/f/unifont.otf", ["Unifont"]), ("/f/NotoSansCJK-Regular.ttc", ["Noto Sans CJK SC"])]})
+        before = len(STATE.fallbacks)
+        with fc, plat:
+            script, path, family = fonts.script_font_for_text("台灣", lang="zh-TW")
+        self.assertEqual((script, family), ("zh", "Noto Sans CJK SC"))
+        self.assertEqual(path, "/f/NotoSansCJK-Regular.ttc")
+        self.assertIn("font_variant_missing", [f.get("code") for f in STATE.fallbacks[before:]])
+
+
 class EmojiTests(unittest.TestCase):
     """1.15: emoji are detected as clusters, measured at a full em, reserved in the ASS and
     composited as PNGs -- and every degraded path says so instead of lying."""
@@ -3353,16 +3723,20 @@ class EmojiTests(unittest.TestCase):
         import glob
         import tempfile as _tf
         out = OUT / "textfile_life.mp4"
-        doc = json.loads(script("overlay.py", self.src, "--text", "Label", "-o", out,
-                                "--json", "--dry-run").stdout)
-        m = re.search(r"textfile=(\S+?\.txt)", " ".join(doc["commands"]).replace("\\", ""))
-        self.assertTrue(m, "the plan must still name the path it would use")
-        self.assertFalse(os.path.exists(m.group(1)), "a dry run wrote a file")
-        self.assertFalse(os.path.isdir(os.path.dirname(m.group(1))), "a dry run created a directory")
-        self.assertEqual(glob.glob(os.path.join(_tf.gettempdir(), "ffmpeg-skill-text-*")), [],
-                         "a drawn-text directory was left behind")
-        self.assertFalse(os.path.exists(os.path.join(_tf.gettempdir(), "ffmpeg-skill-text")),
-                         "the shared world-writable directory must not be created at all")
+        # A temp dir of its own: run_parallel shards this module, and a real drawtext run in the
+        # other shard holds an ffmpeg-skill-text-* directory in the shared one while it works.
+        with _tf.TemporaryDirectory() as tmp:
+            env = dict(os.environ, TMPDIR=tmp, TEMP=tmp, TMP=tmp)
+            doc = json.loads(script("overlay.py", self.src, "--text", "Label", "-o", out,
+                                    "--json", "--dry-run", env=env).stdout)
+            m = re.search(r"textfile=(\S+?\.txt)", " ".join(doc["commands"]).replace("\\", ""))
+            self.assertTrue(m, "the plan must still name the path it would use")
+            self.assertFalse(os.path.exists(m.group(1)), "a dry run wrote a file")
+            self.assertFalse(os.path.isdir(os.path.dirname(m.group(1))), "a dry run created a directory")
+            self.assertEqual(glob.glob(os.path.join(tmp, "ffmpeg-skill-text-*")), [],
+                             "a drawn-text directory was left behind")
+            self.assertFalse(os.path.exists(os.path.join(tmp, "ffmpeg-skill-text")),
+                             "the shared world-writable directory must not be created at all")
 
     def test_the_ass_route_writes_no_drawtext_textfile(self):
         from _common import script_font_status
@@ -3371,10 +3745,12 @@ class EmojiTests(unittest.TestCase):
         import glob
         import tempfile as _tf
         out = OUT / "textfile_ass_route.mp4"
-        script("graphics.py", self.src, "--template", "title", "--title", "\u0915\u093f\u0924\u093e\u092c",
-               "--start", "0", "--end", "2", "-o", out)
-        self.assertEqual(glob.glob(os.path.join(_tf.gettempdir(), "ffmpeg-skill-text-*")), [],
-                         "the ASS route wrote (and kept) a drawtext textfile it never reads")
+        with _tf.TemporaryDirectory() as tmp:  # private, as above: the module runs sharded
+            env = dict(os.environ, TMPDIR=tmp, TEMP=tmp, TMP=tmp)
+            script("graphics.py", self.src, "--template", "title", "--title", "\u0915\u093f\u0924\u093e\u092c",
+                   "--start", "0", "--end", "2", "-o", out, env=env)
+            self.assertEqual(glob.glob(os.path.join(tmp, "ffmpeg-skill-text-*")), [],
+                             "the ASS route wrote (and kept) a drawtext textfile it never reads")
 
     def test_the_ass_route_keeps_braces_and_backslashes(self):
         """The same title through drawtext and through libass must produce the same characters:
@@ -3736,18 +4112,6 @@ class MultiLineDrawtextTests(unittest.TestCase):
         with open(path, "rb") as fh:
             self.assertEqual(fh.read(), b"one\ntwo\nthree")
 
-    def test_centred_lines_are_aligned_where_ffmpeg_can(self):
-        """drawtext's text_align arrived in FFmpeg 6.1; 5.x and 6.0 would reject it, and centre
-        the block as a whole with its lines left-aligned."""
-        import _common
-        saved = _common._FFMPEG_VERSION
-        try:
-            for version, expected in (((5, 1), ""), ((6, 0), ""), ((6, 1), ":text_align=C"), ((9, 0), ":text_align=C")):
-                _common._FFMPEG_VERSION = version
-                self.assertEqual(_common.drawtext_center_align(), expected, version)
-        finally:
-            _common._FFMPEG_VERSION = saved
-
     def _gray(self, path, at):
         raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(at), "-i", str(path), "-frames:v", "1",
                               "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdout=subprocess.PIPE, check=True).stdout
@@ -3791,8 +4155,7 @@ class MultiLineDrawtextTests(unittest.TestCase):
         for band in bands:
             self.assertLess(band[3], self.W - 1, "no line runs off the right edge")
             self.assertGreater(band[2], 0, "no line runs off the left edge")
-            if _common.ffmpeg_version() >= (6, 1):
-                self.assertAlmostEqual((band[2] + band[3]) / 2, self.W / 2, delta=6, msg=f"line {band} is centred")
+            self.assertAlmostEqual((band[2] + band[3]) / 2, self.W / 2, delta=6, msg=f"line {band} is centred")
         self.assertEqual(self._bands(self._gray(out, 3.0), top), [], "no text after the card's --duration")
 
 

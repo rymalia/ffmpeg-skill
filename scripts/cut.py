@@ -13,15 +13,16 @@ WAV), -o out.m4a writes AAC; an audio extension on a video input drops the
 picture (mp4 -> wav extraction). The result reports `precision`
 (packet / sample / codec_frame / frame) and the measured duration error, plus
 `mode` (copy / accurate / hybrid -- "hybrid" means a lossless cut silently
-re-encoded because the keyframe snap exceeded --tolerance), `keyframe_snapped`
-(a stream copy end to end), `start_snapped` (measured: a copied start moved past a frame),
+re-encoded because the keyframe snap exceeded --tolerance), `keyframe_snapped` and
+`start_snapped` (measured: a copied start moved past a frame; equal since 3.0.0),
 `reencode_reason`, `requested_start`/`requested_end` (or `requested_segments` for --segments),
 `requested_duration`, `output_duration` and `duration_delta_seconds` -- so a
 caller never has to trust "it probably cut where I asked" on faith.
 
-A single-segment .mp4/.mov copy shifts its timestamps to zero (-avoid_negative_ts
-make_zero), so the picture starts at the keyframe; --edit-list keeps the MP4 edit
-list instead, which hides the keyframe's pre-roll so the picture starts at --start.
+A single-segment .mp4/.mov copy keeps the MP4 edit list (the default since 3.0.0),
+which hides the keyframe's pre-roll so the picture starts at --start; --no-edit-list
+shifts its timestamps to zero instead (-avoid_negative_ts make_zero, every 2.x
+release's default), so the picture starts at the keyframe.
 An --accurate re-encode of a video does not: make_zero moved the picture by the
 AAC priming (about 21 ms, and further when a B-frame's decode time is negative)
 while the sound stayed at 0. A start that lands on a frame keeps that frame at 0.
@@ -29,14 +30,16 @@ A start between frames begins on the next frame and may keep up to one frame of
 timestamp. The MP4 edit list hides the encoder priming, and a source whose audio
 starts late keeps that offset.
 
-A re-encode uses x264 for an SDR source and x265 Main10 for an HDR or BT.2020 one, as every
-editing tool does; --keep-hevc re-encodes an SDR HEVC source as HEVC (x265 8-bit BT.709, or
-VideoToolbox under --hw), so a trimmed phone clip keeps its codec. --codec overrides both.
+A re-encode keeps an SDR HEVC source HEVC (x265 8-bit BT.709, or VideoToolbox under --hw;
+the default since 3.0.0), so a trimmed phone clip keeps its codec; --no-keep-hevc uses x264
+as every 2.x release did. Other SDR sources get x264 and an HDR or BT.2020 one x265 Main10,
+as every editing tool does. --codec overrides all of these.
 
-A source whose nominal and average frame rates differ is taken for variable-frame-rate and
-re-encoded, as --accurate (--vfr-guard average, the default); its sampled packet timing is
-reported in `vfr_check`. --vfr-guard sampled re-encodes only when that sampled timing is
-variable or too short to judge, and --vfr-guard off keeps the copy with a note.
+The VFR guard samples a video's packet timing (`vfr_check`) and re-encodes, as --accurate,
+only when it is variable or too short to judge (--vfr-guard sampled, the default since
+3.0.0). --vfr-guard average is every 2.x release's: a source whose nominal and average frame
+rates differ is taken for variable-frame-rate and re-encoded. --vfr-guard off keeps the copy
+with a note.
 
 Examples:
   python3 cut.py input.mp4 --start 00:00:10 --end 00:00:25
@@ -48,6 +51,7 @@ Examples:
 import argparse
 import contextlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -56,6 +60,7 @@ from typing import List, Tuple
 
 from _common import (beat_grid, snap_points, decode_pcm_mono, rms_envelope, BEAT_MIN_CONFIDENCE)
 from _common import require_tool
+from _common.probe import TS_EXTS, signatures_match, stream_signature
 from _common import sibling_temp, source_codec_video_args, STATE, add_common, apply_common, audio_codec_for, emit, aac_args, cfr_args, default_output, die, ffmpeg_base, info, is_audio_output, time_arg, probe, run, X264_PRESETS, keyframes_near, MissingFpsError, concat_list_line, place_output, refuse_output_is_input, fmt_secs, measure_frame_timing, dry_run_input_pending
 
 # outputs whose re-encode dropped a subtitle/data stream (reported as dropped_non_av_streams)
@@ -72,7 +77,32 @@ def _t(value: str, fps, flag: str = "--segments") -> float:
     return time_arg(value, flag, fps)
 
 
-def parse_segments(spec: str, fps=None) -> List[Tuple[float, float]]:
+def keep_ranges_after_removing(removed: List[Tuple[float, float]], total: float, fps=None) -> List[Tuple[float, float]]:
+    """--remove: what is left of [0, total] once `removed` is dropped (merged where they overlap,
+    clamped to the file). A leftover shorter than one frame (10 ms without a frame rate) is not a
+    piece anyone asked to keep. Refuses a removal that would leave nothing."""
+    least = 1.0 / fps if fps else 0.01
+    keep, cursor = [], 0.0
+    outside = [(s, e) for s, e in removed if min(total, e) <= min(total, max(0.0, s))]
+    if outside:
+        die("--remove " + ", ".join(f"{s:g}-{e:g}" for s, e in outside) + f" lies outside the file (0-{total:.3f}s), "
+            "so it removes nothing; check the units (seconds, mm:ss)")
+    for s, e in sorted((min(total, max(0.0, s)), min(total, e)) for s, e in removed):
+        if e <= cursor:
+            continue
+        if s - cursor >= least:
+            keep.append((cursor, s))
+        cursor = max(cursor, e)
+    if total - cursor >= least:
+        keep.append((cursor, total))
+    if not keep:
+        die(f"--remove drops the whole file ({total:.3f}s); nothing would be left to keep")
+    return keep
+
+
+def parse_segments(spec: str, fps=None, clamp: bool = False) -> List[Tuple[float, float]]:
+    """START-END,... as seconds. `clamp` (--remove) lets a range start before 0, since the file
+    clamps it; --segments refuses that."""
     segs = []
     for raw in spec.split(","):
         raw = raw.strip()
@@ -82,7 +112,7 @@ def parse_segments(spec: str, fps=None) -> List[Tuple[float, float]]:
             die(f"segment '{raw}' must look like START-END (e.g. 0:05-0:12)")
         a, b = raw.rsplit("-", 1)
         start, end = _t(a, fps), _t(b, fps)
-        if start < 0:
+        if start < 0 and not clamp:
             die(f"segment '{raw}': start must be >= 0")
         if end <= start:
             die(f"segment '{raw}': end must be after start")
@@ -146,11 +176,10 @@ def least_exact(precisions: List[str]) -> str:
 def report_precision(meta: dict, dst: str, reencoded: bool, outcomes: List[dict]) -> dict:
     """The run's precision keys from its segments' outcomes.
 
-    precision         main's formula, unchanged: precision_of() for the whole run, so `packet` only
-                      when nothing re-encoded (the join included)
-    keyframe_snapped  precision == "packet": the run is a stream copy end to end, which lands on
-                      keyframes and packets. Kept with its 2.x meaning; whether a copied START
-                      really moved is start_snapped
+    precision         since 3.0.0, the least exact segment's precision (least_exact_precision);
+                      2.x reported precision_of() for the whole run
+    keyframe_snapped  since 3.0.0, start_snapped (a copied start really moved); 2.x reported
+                      "the run is a stream copy end to end" (precision_of() == "packet")
     start_snapped     measured: true when a copied segment's picture starts more than a frame from
                       its requested start; false when every start is where asked (an edit list, a
                       start on a keyframe, an audio-only copy's packet seek) or everything
@@ -159,7 +188,6 @@ def report_precision(meta: dict, dst: str, reencoded: bool, outcomes: List[dict]
                       an audio-only --segments join of copied and re-encoded parts (a video join
                       re-cuts every segment when any part re-encodes)
     segment_precision each segment's, for --segments (null for one segment)"""
-    precision = precision_of(meta, dst, reencoded)
     snaps = [o.get("start_snapped") for o in outcomes]
     if any(s is True for s in snaps):
         start_snapped = True
@@ -167,8 +195,11 @@ def report_precision(meta: dict, dst: str, reencoded: bool, outcomes: List[dict]
         start_snapped = None
     else:
         start_snapped = False
-    return {"precision": precision, "keyframe_snapped": precision == "packet", "start_snapped": start_snapped,
-            "least_exact_precision": least_exact([o["precision"] for o in outcomes]),
+    least = least_exact([o["precision"] for o in outcomes])
+    # 3.0.0: `precision` is the least exact segment's and `keyframe_snapped` says whether a copied
+    # start really moved (2.x: the run-level formula, and "the run is a stream copy end to end")
+    return {"precision": least, "keyframe_snapped": start_snapped, "start_snapped": start_snapped,
+            "least_exact_precision": least,
             "segment_precision": [o["precision"] for o in outcomes] if len(outcomes) > 1 else None}
 
 
@@ -864,8 +895,17 @@ def cut_one(src: str, start: float, end: float, dst: str, reencode: bool, crf: i
             info("stream copy failed, falling back to re-encode")
             return cut_one(src, start, end, dst, True, crf, preset, tolerance, meta, reasons + ["copy_failed"], edit_list_ok)
         die(f"ffmpeg failed:\n{proc.stderr.strip()}", kind="ffmpeg")
-    if not reencode and tolerance >= 0 and not STATE.dry_run and copy_t is None:
-        out_meta = probe(dst)
+    out_meta = probe(dst) if not reencode and not STATE.dry_run and copy_t is None else None
+    if out_meta is not None:
+        # #367: a copy from MPEG-TS whose window holds no video keyframe writes no video at all
+        # (the TS demuxer does not seek back to one, as the MP4 demuxer does), and ffmpeg exits 0
+        lost = [k for k in ("video", "audio") if meta.get(k) and not out_meta.get(k) and not (k == "video" and audio_only)]
+        if lost:
+            info(f"the stream copy wrote no {' or '.join(lost)} stream (no keyframe to start it from); "
+                 "re-encoding this segment")
+            return _with_notes(cut_one(src, start, end, dst, True, crf, preset, tolerance, meta, reasons + ["stream_lost"],
+                                       edit_list_ok), notes)
+    if out_meta is not None and tolerance >= 0:
         got = out_meta.get("duration") or 0.0
         vdur, fps = (out_meta.get("video") or {}).get("duration"), (meta.get("video") or {}).get("fps")
         if edit_list and not audio_only and vdur and fps and abs(got - vdur) > 1.0 / fps:
@@ -908,17 +948,15 @@ def cut_one(src: str, start: float, end: float, dst: str, reencode: bool, crf: i
 # The most segments one fallback ffmpeg call opens: every segment is its own input (a file handle,
 # a demuxer and a decoder each), and macOS shells default to 256 open files.
 JOIN_CHUNK = 32
+# Seconds of fade on each side of every --segments join the re-encode makes (--declick-ms / --no-declick).
+# Butting two cuts together leaves a step in the waveform wherever they were not both at zero, which
+# plays as a click: measured on a 440 Hz tone, the step at the join was 14x the tone's own largest
+# sample-to-sample change. A 20 ms fade is too short to hear as a dip and long enough to remove it.
+DECLICK_S = 0.02
 # how far before a segment the fallback seeks, so a start inside the B-frame reorder delay before a
 # keyframe still decodes from the keyframe BEFORE it
 SEEK_MARGIN = 1.0
 # codecs whose configuration travels in the packets, so a part with no extradata is not missing any
-IN_BAND_CONFIG = ("mp3", "mp2")
-TS_EXTS = (".ts", ".m2ts", ".mts")
-_SIG_FIELDS = {"video": ("codec_name", "profile", "pix_fmt", "width", "height", "r_frame_rate", "time_base",
-                         "sample_aspect_ratio", "color_transfer", "color_primaries"),
-               "audio": ("codec_name", "profile", "sample_rate", "channels", "time_base")}
-
-
 _PARTS: dict = {}
 
 
@@ -937,21 +975,10 @@ def _part_probe(path: str):
 
 
 def join_signature(path: str):
-    """What a stream-copy join needs to be identical across parts: each stream's type, codec
-    parameters, rotation and extradata hash. None when ffprobe cannot read the part."""
+    """What a stream-copy join needs to be identical across parts (_common.probe.stream_signature).
+    None when ffprobe cannot read the part."""
     doc = _part_probe(path)
-    if doc is None:
-        return None
-    sig = []
-    for st in doc["streams"]:
-        kind = st.get("codec_type")
-        entry = {"type": kind, "extradata_hash": st.get("extradata_hash")}
-        entry.update({f: st.get(f) for f in _SIG_FIELDS.get(kind, ("codec_name",))})
-        if kind == "video":
-            entry["rotation"] = next((sd.get("rotation") for sd in st.get("side_data_list") or []
-                                      if "rotation" in sd), None)
-        sig.append(entry)
-    return sig
+    return None if doc is None else stream_signature(doc)
 
 
 # how far a measured join step may be from the predicted one: ffprobe prints the parts' times
@@ -980,30 +1007,6 @@ def predicted_join_steps(parts) -> list:
     return [None if a is None or b is None else (a[1] - a[3]) + (b[2] - b[0]) for a, b in zip(spans, spans[1:])]
 
 
-def signatures_match(sigs: list, ext: str) -> bool:
-    """True when every part can be joined by stream copy: same streams in the same order with the
-    same parameters. A missing extradata hash only matches another missing one where the codec (or
-    an MPEG-TS output) carries its configuration in-band -- PCM has none at all."""
-    if not sigs or any(sig is None for sig in sigs):
-        return False
-    first = sigs[0]
-    for sig in sigs[1:]:
-        if len(sig) != len(first):
-            return False
-        for a, b in zip(first, sig):
-            if {k: v for k, v in a.items() if k != "extradata_hash"} != {k: v for k, v in b.items() if k != "extradata_hash"}:
-                return False
-            ha, hb = a.get("extradata_hash"), b.get("extradata_hash")
-            if ha or hb:
-                if ha != hb:
-                    return False
-            else:
-                codec = str(a.get("codec_name") or "")
-                if not (codec.startswith("pcm_") or codec in IN_BAND_CONFIG or ext in TS_EXTS):
-                    return False
-    return True
-
-
 def _fraction_rate(text: str) -> float:
     """"30000/1001" or "30" as a number."""
     num, _, den = str(text).partition("/")
@@ -1017,7 +1020,8 @@ def _grid_at_or_after(t: float, v0: float, rate: float) -> float:
 
 
 def _join_chunk(src: str, segments: List[Tuple[float, float]], dst: str, meta: dict, crf: int, preset: str,
-                has_v: bool, intermediate: bool = False, vend=None, hold=frozenset(), first: int = 0) -> List[str]:
+                has_v: bool, intermediate: bool = False, vend=None, hold=frozenset(), first: int = 0,
+                total=None) -> List[str]:
     """Re-cut `segments` from the source into one file through the concat filter, returning the codec
     arguments it encoded with. Each segment is
     its own seeked input, so both of its streams start at the segment's origin (0); neither is
@@ -1072,8 +1076,16 @@ def _join_chunk(src: str, segments: List[Tuple[float, float]], dst: str, meta: d
             graph.append(f"[{i}:v:0]{pad}trim=start={a - half:.6f}:end={b - half:.6f},setpts=PTS-{a:.6f}/TB[v{i}]")
             pads += f"[v{i}]"
         if has_a:
+            # fade only the sides that meet another segment: the file's own start and end stay as cut
+            n = first + i
+            fade = min(DECLICK_S, (b - a) / 2)
+            fades = ""
+            if fade > 0 and n > 0:
+                fades += f",afade=t=in:st=0:d={fade:.6f}"
+            if fade > 0 and n < (len(segments) if total is None else total) - 1:
+                fades += f",afade=t=out:st={b - a - fade:.6f}:d={fade:.6f}"
             graph.append(f"[{i}:a:0]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-{a:.6f}/TB,"
-                         f"aresample=async=1:first_pts=0[a{i}]")
+                         f"aresample=async=1:first_pts=0{fades}[a{i}]")
             pads += f"[a{i}]"
     outs = ("[v]" if has_v else "") + ("[a]" if has_a else "")
     graph.append(f"{pads}concat=n={len(segments)}:v={int(has_v)}:a={int(has_a)}{outs}")
@@ -1120,7 +1132,7 @@ def join_from_source(src: str, segments: List[Tuple[float, float]], dst: str, me
         for k in range(0, len(segments), JOIN_CHUNK):
             chunk = os.path.join(tmp, f"chunk{k // JOIN_CHUNK:03d}.mkv")
             args = _join_chunk(src, segments[k:k + JOIN_CHUNK], chunk, meta, crf, preset, has_v, intermediate=True,
-                               vend=vend, hold=hold, first=k) or []
+                               vend=vend, hold=hold, first=k, total=len(segments)) or []
             if "-tag:v" in args:
                 tag[:] = args[args.index("-tag:v"):args.index("-tag:v") + 2]
             out.append(chunk)
@@ -1287,25 +1299,45 @@ def _join_workspace():
 
 
 def main() -> int:
+    global DECLICK_S
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
     ap.add_argument("-o", "--output", help="output file (default: <name>_cut.<ext>)")
     g = ap.add_argument_group("range (single segment)")
-    g.add_argument("--start", default="0", help="start time (seconds, mm:ss or hh:mm:ss.ms). default 0")
+    g.add_argument("--start", help="start time (seconds, mm:ss or hh:mm:ss.ms). default 0")
     g.add_argument("--end", help="end time")
     g.add_argument("--duration", help="duration instead of --end")
     ap.add_argument("--segments", help="comma separated START-END list, e.g. '0:05-0:12,1:00-1:20' (joined in order)")
+    ap.add_argument("--remove", metavar="START-END[,...]",
+                    help="the inverse of --segments: drop these ranges and keep the rest, joined in order "
+                         "(e.g. '1:20-2:05,10:00-10:30'); overlapping ranges merge")
     ap.add_argument("--accurate", action="store_true", help="always re-encode for frame-accurate (video) / sample-accurate (audio) cuts (default: lossless -c copy, re-encoding only when the keyframe snap exceeds --tolerance)")
-    ap.add_argument("--edit-list", action="store_true", help="a single-segment .mp4/.mov stream copy keeps the MP4 edit list that hides the keyframe's pre-roll, so the picture starts at --start (default: -avoid_negative_ts make_zero, the picture starts at the keyframe); a player that ignores edit lists shows the pre-roll")
-    ap.add_argument("--keep-hevc", action="store_true", help="a re-encode of an SDR HEVC source stays HEVC (x265 8-bit BT.709; VideoToolbox under --hw) instead of x264 (default: x264 for SDR, x265 Main10 for HDR); --codec overrides it")
-    ap.add_argument("--vfr-guard", choices=["average", "sampled", "off"], default="average",
-                    help="what keeps a variable-frame-rate source from a stream copy (default average: a nominal rate "
-                         "that differs from the average re-encodes, as --accurate, and the sampled frame timing is "
-                         "reported; sampled: re-encode only when sampled packet timestamps are variable or too few "
-                         "to judge; off: measure and keep the copy, with a note)")
+    el = ap.add_mutually_exclusive_group()
+    el.add_argument("--edit-list", action="store_true",
+                    help="a single-segment .mp4/.mov stream copy keeps the MP4 edit list that hides the keyframe's pre-roll, "
+                         "so the picture starts at --start (the default since 3.0.0); a player that ignores edit lists shows the pre-roll")
+    el.add_argument("--no-edit-list", action="store_true",
+                    help="shift the copy's timestamps instead (-avoid_negative_ts make_zero, every 2.x release's default): "
+                         "the picture starts at the keyframe before --start")
+    kh = ap.add_mutually_exclusive_group()
+    kh.add_argument("--keep-hevc", action="store_true",
+                    help="a re-encode of an SDR HEVC source stays HEVC (x265 8-bit BT.709; VideoToolbox under --hw); "
+                         "the default since 3.0.0; --codec overrides it")
+    kh.add_argument("--no-keep-hevc", action="store_true",
+                    help="re-encode an SDR HEVC source with x264, as every 2.x release did (HDR still gets x265 Main10)")
+    ap.add_argument("--vfr-guard", choices=["average", "sampled", "off"], default="sampled",
+                    help="what keeps a variable-frame-rate source from a stream copy (default sampled since 3.0.0: re-encode "
+                         "only when sampled packet timestamps are variable or too few to judge; average, every 2.x "
+                         "release's default: a nominal rate that differs from the average re-encodes, as --accurate, "
+                         "and the sampled timing is reported; off: measure and keep the copy, with a note)")
     ap.add_argument("--tolerance", type=float, default=0.5, help="max seconds a lossless cut may deviate before re-encoding kicks in (default 0.5, -1 = never for a "
                          "keyframe snap; a --segments join is still re-cut for open GOPs, a later B-frame .mp4/.mov "
                          "segment starting between keyframes, or a failed join check)")
+    dc = ap.add_mutually_exclusive_group()
+    dc.add_argument("--declick-ms", type=float, default=DECLICK_S * 1000,
+                    help="--segments: fade the sound this many ms on each side of every join the re-encode makes, so "
+                         "butted cuts do not click (default %(default)g; a stream-copy join is not faded)")
+    dc.add_argument("--no-declick", action="store_true", help="--segments: butt the joins with no fade")
     snap = ap.add_argument_group("beat snapping")
     snap.add_argument("--snap", choices=["none", "beats"], default="none",
                       help="move each in/out point to the nearest measured beat (default none)")
@@ -1323,7 +1355,9 @@ def main() -> int:
     args = ap.parse_args()
     apply_common(args)
     global KEEP_HEVC
-    KEEP_HEVC = args.keep_hevc
+    # 3.0.0 defaults: keep HEVC and the edit list unless the --no- form is given (--edit-list and
+    # --keep-hevc stay accepted, and now say what happens anyway)
+    KEEP_HEVC = not args.no_keep_hevc
 
     meta = probe(args.input)
     total = meta.get("duration") or 0.0
@@ -1339,10 +1373,21 @@ def main() -> int:
         forced.append("codec")
 
     fps = (meta.get("video") or {}).get("fps")
+    if args.remove:
+        if args.segments or args.end or args.duration or args.start is not None:
+            die("--remove names what to drop from the whole file: it does not combine with --segments, --start, --end or --duration")
+        if args.snap == "beats":
+            # a snapped edge of what is kept could move into a range the caller asked to drop
+            die("--remove drops exactly the ranges given: --snap beats would move the kept edges, possibly into them; "
+                "snap the ranges first (scenes.py --beats) or cut with --segments --snap beats")
+        if not total:
+            die(f"--remove needs the input's duration, which {args.input} does not report"
+                + (" yet (it is an earlier step's output)" if dry_run_input_pending(args.input) else ""))
+        args.segments = ",".join(f"{s:.6f}-{e:.6f}" for s, e in keep_ranges_after_removing(parse_segments(args.remove, fps, clamp=True), total, fps))
     if args.segments:
         segments = parse_segments(args.segments, fps)
     else:
-        start = _t(args.start, fps, "--start")
+        start = _t(args.start or "0", fps, "--start")
         if start < 0:
             die(f"--start must not be negative, got {args.start!r}")
         if args.end and args.duration:
@@ -1456,12 +1501,15 @@ def main() -> int:
             args.accurate = True
             forced.append("vfr" if measured == "vfr" else "vfr_inconclusive")
 
+    if not math.isfinite(args.declick_ms) or args.declick_ms < 0:
+        die(f"--declick-ms must be a finite number of ms, 0 or more, got {args.declick_ms:g}")
+    DECLICK_S = 0.0 if args.no_declick else args.declick_ms / 1000
     outcomes: List[dict] = []
     join_reencoded = False
     join_check = None
     if len(segments) == 1:
         outcomes.append(cut_one(args.input, segments[0][0], segments[0][1], output, args.accurate, args.crf, args.preset, args.tolerance, meta,
-                                edit_list_ok=args.edit_list))
+                                edit_list_ok=not args.no_edit_list))
     elif hold_needed or args.accurate:
         # Straight to one encode through the concat filter. A held frame needs the re-cut (no part
         # can carry it into a copy join); and when every part re-encodes anyway, encoding each on
@@ -1653,7 +1701,13 @@ def main() -> int:
         notes.append(skew_note)
     info(f"wrote {output} ({fmt_secs(got)}, expected ~{expected:.3f}s, "
          + ("re-encoded" if reencoded else "lossless stream copy") + f", {precision} precision)")
+    # the streams the source had and this cut was not told to drop (an audio extension drops the
+    # picture): #367, a TS cut that lost its video must not say verified. ffmpeg's default stream
+    # selection writes one of each, so that is the count; the source's own picture/sound gap is
+    # the reference for the lengths check
+    expect_streams = {"video": int(bool(meta.get("video")) and not is_audio_output(output)), "audio": int(bool(meta.get("audio")))}
     emit(output, expected_duration=round(expected, 6), duration_error_ms=error_ms, precision=precision, reencoded=reencoded,
+         expect_streams=expect_streams, stream_reference=[meta], stream_windows=[(s, e) for s, e in requested],
          dropped_non_av_streams=bool(DROPPED_STREAMS),
          requested_start=round(requested[0][0], 6) if len(requested) == 1 else None,
          requested_end=round(requested[0][1], 6) if len(requested) == 1 else None,
@@ -1665,6 +1719,9 @@ def main() -> int:
          segment_precision=report["segment_precision"],
          edit_list=bool(single.get("edit_list")), stored_preroll_seconds=stored, av_start_skew_seconds=skew,
          join_check=join_check, segment_end_snap_seconds=end_snaps,
+         # the joins were faded only where the concat filter re-encoded them
+         declick_ms=(DECLICK_S * 1000 if len(segments) > 1 and (join_reencoded or args.accurate) and meta.get("audio")
+                     else None),
          notes=notes, **({"vfr_check": vfr_check} if vfr_check else {}),
          nearest_keyframes=sorted(NEAREST_KEYFRAMES) if NEAREST_KEYFRAMES else None,
          # the trade the caller can offer instead of a re-encode (eval e02: "without losing quality")

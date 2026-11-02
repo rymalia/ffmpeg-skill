@@ -7,7 +7,10 @@ bottom-right, or explicit "X,Y" pixels (negative counts from the far edge).
 
 --video composites a second VIDEO as a picture-in-picture layer (position,
 scale, opacity, time-range -- same knobs as --image), instead of a still
-image or text. Only the main input's audio is kept; the PiP layer's own
+image or text. --place SRC_START-SRC_END@AT (repeatable, with --video) shows only
+that range of the layer, starting at AT on the main timeline: one pass lays
+several pieces of a layer (say, graphics rendered back to back) at their own
+times, and the main picture shows untouched everywhere else. Only the main input's audio is kept; the PiP layer's own
 audio track, if any, is dropped -- mixing two audio tracks is a job for
 audio.py, not this tool. --chromakey COLOR (with --video) turns that colour
 transparent first (green-screen removal) before compositing.
@@ -19,13 +22,18 @@ Examples:
   python3 overlay.py input.mp4 --text "こんにちは" --font-file /path/NotoSansCJK-Bold.ttc --box
   python3 overlay.py input.mp4 --video webcam.mp4 --position bottom-right --scale 480 --opacity 0.9
   python3 overlay.py bg.mp4 --video greenscreen.mp4 --chromakey 0x00ff00 --chromakey-similarity 0.15
+  python3 overlay.py talk.mp4 --video cues.mov --position 0,0 --margin 0 --place 0-2.5@12 --place 2.5-6@40
 """
 import argparse
+import re
 import sys
 from typing import List, Optional
 
 from _platforms import PLATFORMS, PLATFORM_CHOICES, safe_margins_px, resolve as resolve_platform
-from _common import STATE, script_font_for_text, drawtext_text_opts, needs_shaping, LANGUAGE_NAMES, has_emoji, detect_script, emoji_clusters, load_brand, drawn_chain, label_chain, matrix_chain, rgb_chain_to_bt709, video_args, add_common, apply_common, default_font_file, emit, aac_args, cfr_args, default_output, die, escape_drawtext, escape_filter_path, ffmpeg_base, info, parse_time, probe, run, run_keeping_subtitles, validate_color, x264_args, X264_PRESETS, time_arg, fmt_secs
+from _common import STATE, script_font_for_text, drawtext_clean, drawtext_line_metrics, drawtext_text_opts, drawtext_draws_newline_glyph, is_multiline, needs_shaping, LANGUAGE_NAMES, has_emoji, detect_script, emoji_clusters, load_brand, drawn_chain, label_chain, matrix_chain, rgb_chain_to_bt709, video_args, add_common, apply_common, emit, aac_args, cfr_args, default_output, die, escape_drawtext, ffmpeg_base, info, parse_time, probe, run, run_keeping_subtitles, validate_color, x264_args, X264_PRESETS, time_arg, fmt_secs
+from _common.emit import warn
+from _common.fonts import font_choice, record_font_choice
+from _common import drawtext_fontfile  # noqa: E402
 
 # Per-edge margins: a platform's UI does not cover the same fraction of every edge (TikTok's
 # like column is 14 % of the width, its description block 22 % of the height), so a position
@@ -87,6 +95,84 @@ def alpha_expr(opacity: float, start: Optional[float], end: Optional[float], fad
     return "max(0," + "*".join(parts) + ")"
 
 
+def _num(v: float) -> str:
+    """A measured pixel value as an expression literal (no exponent form)."""
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+def per_line_drawtext(lines: List[str], x: str, y: str, font_opt: str, args: argparse.Namespace,
+                      box: List[str], timing: List[str]) -> str:
+    """The drawtext chain for a multi-line --text on a release whose drawtext draws a box at each
+    line break (drawtext_draws_newline_glyph): one drawtext per line, each line alone, placed
+    where one multi-line drawtext puts it on a fixed release.
+
+    That block's layout is drawtext's own (measure_text/draw_text): text_w is the widest line,
+    text_h = lh*(lines-1) + the first line's top_a + the last line's bottom_d, the lines are
+    left-aligned at x, and line i's baseline is y + top_a + i*lh. Each line is measured alone
+    (drawtext_line_metrics), so the box the bug adds is in no number; x and y keep the caller's
+    position expressions with text_w/text_h replaced by the block's values, and each line is
+    drawn with y_align=baseline at its own baseline. The outlines of every line are drawn before
+    any line's text, as one drawtext draws them, so a descender's outline never covers the next
+    line's glyphs; the --box is drawn once, by the first line, at the block's size (boxw/boxh).
+    Bit-identical to one multi-line drawtext on 8.1.3 for every named position, with and without
+    --box; a font whose glyph boxes are not whole pixels (no hinting) can sit one row lower, since
+    drawtext reports top_a rounded up."""
+    m = drawtext_line_metrics(lines, font_opt, args.font_size)
+    seen = [d for d in m if d]
+    lh = seen[0]["lh"]
+    width = max(d["w"] for d in seen)
+    # an empty first/last line has no glyphs: drawtext's -32000/64 start values, as it measures them
+    top = m[0]["top"] if m[0] else -500.0
+    bottom = m[-1]["bottom"] if m[-1] else -500.0
+    height = lh * (len(lines) - 1) + top + bottom
+
+    def block(expr: str) -> str:
+        return re.sub(r"\btext_h\b", _num(height), re.sub(r"\btext_w\b", _num(width), expr))
+
+    bx, by = block(x), block(y)
+    passes = ([[f"borderw={args.border}", f"bordercolor={args.border_color}", "fontcolor=black@0"],
+               ["fontcolor=" + args.font_color]] if args.border else [["fontcolor=" + args.font_color]])
+    filters = []
+    for n, paint in enumerate(passes):
+        for i, line in enumerate(lines):
+            if not line:
+                continue
+            opts = [drawtext_text_opts(line), f"fontsize={args.font_size}", f"x={bx}", f"y={by}+{_num(top + i * lh)}",
+                    "y_align=baseline", font_opt] + paint + timing[:1]
+            if box and n == 0 and not filters:
+                opts += box + [f"boxw={_num(width)}", f"boxh={_num(height)}"]
+            filters.append("drawtext=" + ":".join(opts + timing[1:]))
+    return ",".join(filters)
+
+
+# one time inside --place: seconds, mm:ss, hh:mm:ss.ms or hh:mm:ss:ff with an optional @fps
+# suffix (the time grammar's own); times are never negative, so '-' only separates the range
+_PLACE_TIME = r"[^@\-]+(?:@[0-9.]+)?"
+
+
+def parse_placements(specs: List[str], main_fps: Optional[float], layer_fps: Optional[float]) -> List[tuple]:
+    """--place SRC_START-SRC_END@AT -> [(src_start, src_end, at)], refusing empty, negative or
+    overlapping placements (two pieces on screen at once would stack in an order nobody asked for).
+    SRC_START/SRC_END are positions in the layer, so an hh:mm:ss:ff timecode there counts the
+    layer's frames; AT is a position on the main timeline and counts the main video's."""
+    out = []
+    for spec in specs:
+        m = re.fullmatch(rf"\s*({_PLACE_TIME})-({_PLACE_TIME})@({_PLACE_TIME})\s*", spec)
+        if not m:
+            die(f"--place {spec!r}: use SRC_START-SRC_END@AT, e.g. 0-2.5@12 (times are not negative)")
+        a = time_arg(m.group(1), "--place", layer_fps)
+        b = time_arg(m.group(2), "--place", layer_fps)
+        at = time_arg(m.group(3), "--place", main_fps)
+        if b <= a:
+            die(f"--place {spec!r}: the layer range ends before it starts")
+        out.append((a, b, at))
+    spans = sorted((at, at + (b - a)) for a, b, at in out)
+    for (s1, e1), (s2, _e2) in zip(spans, spans[1:]):
+        if s2 < e1 - 1e-6:
+            die(f"--place: pieces overlap on the main timeline ({s1:g}-{e1:g} s and from {s2:g} s)")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
@@ -100,6 +186,10 @@ def main() -> int:
     src.add_argument("--text", help="text to draw (drawtext)")
     src.add_argument("--logo", action="store_true", help="composite the brand logo from --brand (position/scale/opacity from brand.json)")
     src.add_argument("--video", help="a second video to composite as a picture-in-picture layer")
+    ap.add_argument("--place", action="append", default=[], metavar="SRC_START-SRC_END@AT",
+                    help="with --video, repeatable: show this range of the layer starting at AT on the main "
+                         "timeline (e.g. 0-2.5@12); the layer is hidden outside its placed ranges. Times in "
+                         "seconds or HH:MM:SS. Not with --start/--end/--fade")
     ck = ap.add_argument_group("chroma key (with --video)")
     ck.add_argument("--chromakey", help="colour to key out (green-screen removal), e.g. 0x00ff00 or green")
     ck.add_argument("--chromakey-similarity", type=float, default=0.15, help="how close a pixel must be to --chromakey to become transparent, 0..1 (default 0.15)")
@@ -189,20 +279,22 @@ def main() -> int:
             if args.emoji == "none":
                 for _i, _cl in list(reversed(emoji_clusters(args.text))):
                     args.text = args.text[:_i] + args.text[_i + len(_cl):]
-                info("emoji: stripped from the drawn text (--emoji none)")
+                warn("emoji: stripped from the drawn text (--emoji none)", "emoji_stripped", mode="none")
             else:
-                info("warning: emoji are drawn by the text font here (monochrome at best); "
-                     "caption.py/graphics.py composite colour PNGs with --emoji-assets")
+                warn("emoji are drawn by the text font here (monochrome at best); "
+                     "caption.py/graphics.py composite colour PNGs with --emoji-assets", "emoji_monochrome")
+    script_file = script_family = None
     if args.text and not args.font_file:
         # 1.12: non-Latin overlay text picks a font by script, so a title in Japanese, Korean,
         # Arabic ... draws glyphs instead of boxes. drawtext does not shape or reorder RTL text --
         # see references/gotchas.md#fonts-by-script.
-        _script, script_file, _family = script_font_for_text(
+        _script, script_file, script_family = script_font_for_text(
             args.text, font=args.font, font_explicit=args.font != ap.get_default("font"), font_file=args.font_file)
-        if script_file:
-            args.font_file = script_file
-    if not args.font_file:
-        args.font_file = default_font_file(args.font)
+    # the font drawtext gets, reported as `font_used` and recorded when it is not the one asked for
+    font_used = font_choice(args.font, font_file=args.font_file, script_file=script_file, script_family=script_family)
+    args.font_file = font_used["file"]
+    if args.text:
+        record_font_choice(font_used)
     meta = probe(args.input)
     if not meta.get("video"):
         die("input has no video stream")
@@ -249,6 +341,10 @@ def main() -> int:
         die("--chromakey-similarity must be within (0, 1]")
     if not 0 <= args.chromakey_blend <= 1:
         die("--chromakey-blend must be within 0..1")
+    if args.place and not args.video:
+        die("--place needs --video")
+    if args.place and (args.start or args.end or args.fade):
+        die("--place sets when each piece shows: drop --start / --end / --fade")
 
     output = args.output or default_output(args.input, "overlay")
     enable = enable_expr(start, end)
@@ -300,6 +396,24 @@ def main() -> int:
         pip_meta = probe(args.video)
         if not pip_meta.get("video"):
             die(f"--video {args.video} has no video stream")
+        layer_fps = pip_meta["video"].get("fps")
+        placements = parse_placements(args.place, fps, layer_fps) if args.place else []
+        # bounds from the video streams (a longer audio track would let a range run past the last
+        # picture); the container duration only when a stream has none
+        layer_dur = pip_meta["video"].get("duration") or pip_meta.get("duration")
+        main_dur = meta["video"].get("duration") or meta.get("duration")
+        # half a layer frame of slack absorbs a hand-typed end that rounds the last frame's end
+        # (2.033 for 61 frames at 30 fps); anything longer asks for pictures the layer does not have
+        slack = 0.5 / layer_fps if layer_fps else 0.02
+        for a, b, at in placements:
+            if layer_dur and a >= layer_dur:
+                # the slack below is for an end rounded past the last frame; a start there selects
+                # no picture at all and the "placed" piece would silently never show
+                die(f"--place {a:g}-{b:g}@{at:g}: starts at or after the layer's end ({layer_dur:.3f} s)")
+            if layer_dur and b > layer_dur + slack:
+                die(f"--place {a:g}-{b:g}@{at:g}: the layer is only {layer_dur:.3f} s long")
+            if main_dur and at >= main_dur:
+                die(f"--place {a:g}-{b:g}@{at:g}: starts after the main video ends ({main_dur:.3f} s)")
         chain = []
         if args.scale_percent:
             chain.append(f"scale={int(vw * args.scale_percent / 100)}:-2")
@@ -321,8 +435,26 @@ def main() -> int:
         base, pip = matrix_chain(meta, meta), matrix_chain(pip_meta, meta)
         if base or pip:
             base, pip = base or label_chain(meta, meta), pip or label_chain(pip_meta, meta)
-        fc = (f"[1:v]{pip}{','.join(chain)}[ov];"
-              + (f"[0:v]{base}null[base];[base]" if base else "[0:v]") + f"[ov]{ov}[out]")
+        if placements:
+            # each placed piece: its range of the layer, re-timed to start at AT; eof_action=pass shows
+            # the main picture untouched once a piece ends (the default would freeze its last frame)
+            pieces = len(placements)
+            # trim selects by timestamp: start the layer's at 0 so SRC_START/SRC_END count from its
+            # first picture even when its video stream starts later than the file (audio first)
+            fc = f"[1:v]setpts=PTS-STARTPTS,{pip}{','.join(chain)},split={pieces}" + "".join(f"[p{i}]" for i in range(pieces)) + ";"
+            for i, (a, b, at) in enumerate(placements):
+                fc += f"[p{i}]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS+{at:.6f}/TB[q{i}];"
+            prev = f"[0:v]{base}null[m]" if base else None
+            if prev:
+                fc += prev + ";"
+            cur = "[m]" if base else "[0:v]"
+            for i in range(pieces):
+                nxt = "[out]" if i == pieces - 1 else f"[m{i}]"
+                fc += f"{cur}[q{i}]{ov}:eof_action=pass{nxt}" + ("" if i == pieces - 1 else ";")
+                cur = nxt
+        else:
+            fc = (f"[1:v]{pip}{','.join(chain)}[ov];"
+                  + (f"[0:v]{base}null[base];[base]" if base else "[0:v]") + f"[ov]{ov}[out]")
         cmd += ["-filter_complex", fc, "-map", "[out]", "-map", f"0:a:{args.audio_stream}?"]
         if meta.get("duration"):
             # See the --image branch above: -t (exact, bounds only the main input) instead of
@@ -334,23 +466,23 @@ def main() -> int:
         x, y = position_exprs(args.position, args.margin, text_mode=True, margins=safe_margins)
         # 1.15: the text goes in a FILE with expansion off, so `'` and `%` survive verbatim
         # (they used to be dropped by escape_drawtext) and no character can reach the graph parser.
-        opts = [drawtext_text_opts(args.text), f"fontsize={args.font_size}", f"x={x}", f"y={y}",
-                f"borderw={args.border}", f"bordercolor={args.border_color}"]
-        if args.font_file:
-            opts.append(f"fontfile={escape_filter_path(args.font_file)}")
-        else:
-            opts.append(f"font='{escape_drawtext(args.font)}'")
+        font_opt = (drawtext_fontfile(args.font_file) if args.font_file
+                    else f"font='{escape_drawtext(args.font)}'")
         alpha = alpha_expr(args.opacity, start if start is not None else (0.0 if args.fade > 0 else None), end, args.fade)
-        opts.append(f"fontcolor={args.font_color}")
-        if alpha != "1":
-            opts.append(f"alpha='{alpha}'")
-        if args.box:
-            opts += ["box=1", f"boxcolor={args.box_color}", "boxborderw=12"]
-        if enable:
-            opts.append(f"enable='{enable}'")
+        timing = ([f"alpha='{alpha}'"] if alpha != "1" else []) + ([f"enable='{enable}'"] if enable else [])
+        box = ["box=1", f"boxcolor={args.box_color}", "boxborderw=12"] if args.box else []
+        if is_multiline(args.text) and drawtext_draws_newline_glyph():
+            # this release's drawtext draws the font's missing-glyph box at every line break and
+            # counts it in text_w: one drawtext per line, placed where one block would put it
+            drawing = per_line_drawtext(drawtext_clean(args.text).split("\n"), x, y, font_opt, args, box, timing)
+        else:
+            opts = [drawtext_text_opts(args.text), f"fontsize={args.font_size}", f"x={x}", f"y={y}",
+                    f"borderw={args.border}", f"bordercolor={args.border_color}", font_opt,
+                    f"fontcolor={args.font_color}"] + timing[:1] + box + timing[1:]
+            drawing = "drawtext=" + ":".join(opts)
         # a font/border/box colour with chroma lands in the BT.709 the output is tagged with
         colours = [args.font_color] + ([args.border_color] if args.border else []) + ([args.box_color] if args.box else [])
-        cmd += ["-vf", drawn_chain("drawtext=" + ":".join(opts), meta, colours), "-map", "0:v:0"]
+        cmd += ["-vf", drawn_chain(drawing, meta, colours), "-map", "0:v:0"]
         if meta.get("audio"):
             cmd += ["-map", f"0:a:{args.audio_stream}"]
 
@@ -360,7 +492,7 @@ def main() -> int:
     if not STATE.dry_run:
         result = probe(output, role="output")
         info(f"wrote {output} ({fmt_secs(result['duration'])})")
-    emit(output, dropped_non_av_streams=dropped_streams)
+    emit(output, dropped_non_av_streams=dropped_streams, **({"font_used": font_used} if args.text else {}))
     return 0
 
 

@@ -25,7 +25,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from _common.probe import SILENT_PEAK_DBFS
 from _common import STATE, add_common, dry_run_input_pending, require_tool, apply_common, audio_codec_for, db_to_linear, default_output, die, emit, ffmpeg_base, info, is_audio_output, measured_level_dbfs, probe, run, run_keeping_subtitles, fmt_secs
+from _common.emit import warn
 
 VOICE_CHAIN = "highpass=f=80,deesser=i=0.4,afftdn=nf=-25:tn=1,acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=2"
 
@@ -215,7 +217,7 @@ def main() -> int:
     ap.add_argument("--on-silent", choices=["warn", "fail"], default="warn",
                     help="a --music/--replace/--effects file (or, under --duck, the voice) whose peak is at or below "
                          "--silence-threshold: warn (default: mix it, report it under `silent`) or fail (refuse before ffmpeg runs)")
-    ap.add_argument("--silence-threshold", type=float, default=-50.0, metavar="DBFS",
+    ap.add_argument("--silence-threshold", type=float, default=SILENT_PEAK_DBFS, metavar="DBFS",
                     help="peak level in dBFS at or below which a track counts as silent (default -50)")
     add_common(ap)
     args = ap.parse_args()
@@ -261,7 +263,7 @@ def main() -> int:
         notes.append("silent track(s) mixed anyway: " + "; ".join(
             f"{t['flag']} {t['path']} peaks at {t['peak_db']:g} dBFS" for t in silent)
             + f" (at or below --silence-threshold {args.silence_threshold:g}); pass --on-silent fail to refuse instead")
-        info("warning: " + notes[-1])
+        warn(notes[-1], "silent_track_mixed", tracks=[t["path"] for t in silent])
 
     meta = probe(args.input)
     dur = meta.get("duration") or 0.0

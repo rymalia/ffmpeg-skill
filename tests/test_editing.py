@@ -50,12 +50,49 @@ class EditingTests(MediaFixtures):
         script("cut.py", self.src, "--segments", "1-3,6-9", "--accurate", "-o", out)
         self.assertClose(probe(str(out))["duration"], 5.0, 0.15)
 
+    def test_cut_segments_join_is_faded_so_it_does_not_click(self):
+        """Butting two cuts of a tone left a step in the waveform at the join 14x the tone's own
+        largest sample-to-sample change: an audible click. Every join the re-encode makes is now
+        faded (--declick-ms, 20 by default); --no-declick keeps the old butt join."""
+        tone = OUT / "declick_tone.wav"
+        if not tone.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+               "sine=f=440:d=4:sample_rate=48000", "-c:a", "pcm_s16le", tone)
+
+        def largest_step(path):
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "s16le", "-ac", "1", "-"],
+                                 stdout=subprocess.PIPE, check=True).stdout
+            pcm = memoryview(raw).cast("h")
+            return max(abs(pcm[i + 1] - pcm[i]) for i in range(len(pcm) - 1))
+
+        own = largest_step(tone)
+        runs = {}
+        for name, extra in (("faded", ()), ("butted", ("--no-declick",))):
+            out = OUT / f"declick_{name}.wav"
+            runs[name] = json.loads(script("cut.py", tone, "--segments", "0-1.0011,2-3", "--accurate", *extra,
+                                           "-o", out, "--json").stdout)
+            runs[name]["step"] = largest_step(out)
+        self.assertEqual((runs["faded"]["declick_ms"], runs["butted"]["declick_ms"]), (20.0, 0.0))
+        self.assertLessEqual(runs["faded"]["step"], own * 1.1, runs)
+        self.assertGreater(runs["butted"]["step"], own * 2, runs)
+        # nothing to fade without sound, and a fade length that is not a number is refused
+        silent = OUT / "declick_silent.mp4"
+        if not silent.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+               "color=c=gray:s=160x120:r=30:d=4", "-c:v", "libx264", silent)
+        data = json.loads(script("cut.py", silent, "--segments", "0-1,2-3", "--accurate", "-o",
+                                 OUT / "declick_silent_out.mp4", "--json").stdout)
+        self.assertIsNone(data["declick_ms"])
+        refused = script("cut.py", tone, "--segments", "0-1,2-3", "--accurate", "--declick-ms=nan",
+                         "-o", OUT / "declick_nan.wav", expect_fail=True)
+        self.assertIn("finite", refused.stderr)
+
     def test_cut_json_reports_requested_vs_actual_and_mode(self):
         # exact-second cut on a keyframe-aligned GOP: expect a clean lossless copy
         out = OUT / "cut_honest_copy.mp4"
         data = json.loads(script("cut.py", self.src, "--start", "2", "--end", "6", "--tolerance", "-1", "-o", out, "--json").stdout)
         self.assertEqual(data["mode"], "copy")
-        self.assertTrue(data["keyframe_snapped"])
+        self.assertFalse(data["keyframe_snapped"], "3.0: the start is where asked (start_snapped)")
         self.assertEqual(data["requested_start"], 2.0)
         self.assertEqual(data["requested_end"], 6.0)
         self.assertEqual(data["requested_duration"], 4.0)
@@ -71,7 +108,7 @@ class EditingTests(MediaFixtures):
         # a start/end that doesn't land on a keyframe, with a tight tolerance, must silently
         # upgrade from copy to re-encode -- and say "hybrid", not just "reencoded: true"
         out3 = OUT / "cut_honest_hybrid.mp4"
-        data3 = json.loads(script("cut.py", self.src, "--start", "1.13", "--end", "5.71", "--tolerance", "0.02", "-o", out3, "--json").stdout)
+        data3 = json.loads(script("cut.py", self.src, "--start", "1.13", "--end", "5.71", "--tolerance", "0.02", "--no-edit-list", "-o", out3, "--json").stdout)
         self.assertTrue(data3["reencoded"])
         self.assertEqual(data3["mode"], "hybrid")
         self.assertFalse(data3["keyframe_snapped"])
@@ -97,7 +134,9 @@ class EditingTests(MediaFixtures):
         genuinely diverge, and a caller must be told this happened, not left to assume the file
         starts exactly where it asked."""
         out = OUT / "cut_copy_keyframe_snap.mp4"
-        data = json.loads(script("cut.py", self.src, "--start", "1.13", "--end", "5.71", "--tolerance", "2.0", "-o", out, "--json").stdout)
+        # --no-edit-list: the 3.0 default edit list hides the snapped pre-roll, so the start would not move
+        data = json.loads(script("cut.py", self.src, "--start", "1.13", "--end", "5.71", "--tolerance", "2.0", "--no-edit-list",
+                                 "-o", out, "--json").stdout)
         self.assertEqual(data["mode"], "copy")
         self.assertTrue(data["keyframe_snapped"])
         self.assertFalse(data["reencoded"])
@@ -152,12 +191,12 @@ class EditingTests(MediaFixtures):
         self.assertEqual(cut.least_exact(["sample", "frame"]), "frame")
         self.assertEqual(cut.least_exact(["sample"]), "sample")
 
-    def test_cut_precision_keeps_its_formula_and_least_exact_precision_is_beside_it(self):
-        """`precision` and `keyframe_snapped` keep their 2.x formula (precision_of() for the run;
-        keyframe_snapped is precision == packet). The one run where the least exact segment differs
-        is an audio-only join of a copied and a re-encoded part: precision says the run re-encoded,
-        least_exact_precision that one part is only packet-exact. start_snapped is true when any
-        copied start moved, null while one is unmeasured (--dry-run), false otherwise."""
+    def test_cut_precision_is_the_least_exact_segments_and_keyframe_snapped_is_start_snapped(self):
+        """3.0.0: `precision` is least_exact_precision and `keyframe_snapped` is start_snapped (2.x:
+        precision_of() for the run, and keyframe_snapped = precision == packet). The run where they
+        differed is an audio-only join of a copied and a re-encoded part: precision now says one
+        part is only packet-exact. start_snapped is true when any copied start moved, null while
+        one is unmeasured (--dry-run), false otherwise."""
         sys.path.insert(0, str(SCRIPTS))
         import cut
         wav = {"audio": {"codec": "pcm_s16le"}}
@@ -165,11 +204,11 @@ class EditingTests(MediaFixtures):
         def part(precision, reencoded, snapped):
             return {"precision": precision, "reencoded": reencoded, "start_snapped": snapped}
         mixed = cut.report_precision(wav, "out.wav", True, [part("packet", False, False), part("sample", True, False)])
-        self.assertEqual((mixed["precision"], mixed["least_exact_precision"]), ("sample", "packet"))
+        self.assertEqual((mixed["precision"], mixed["least_exact_precision"]), ("packet", "packet"))
         self.assertEqual(mixed["segment_precision"], ["packet", "sample"])
         self.assertFalse(mixed["keyframe_snapped"])
         copy = cut.report_precision(wav, "out.wav", False, [part("packet", False, False)])
-        self.assertEqual((copy["precision"], copy["least_exact_precision"], copy["keyframe_snapped"]), ("packet", "packet", True))
+        self.assertEqual((copy["precision"], copy["least_exact_precision"], copy["keyframe_snapped"]), ("packet", "packet", False))
         self.assertIsNone(copy["segment_precision"])
         video = {"video": {"codec": "h264"}}
         self.assertIs(cut.report_precision(video, "o.mp4", False, [part("packet", False, None), part("packet", False, True)])["start_snapped"], True)
@@ -177,8 +216,8 @@ class EditingTests(MediaFixtures):
         self.assertIs(cut.report_precision(video, "o.mp4", True, [part("frame", True, False)])["start_snapped"], False)
 
     def test_cut_start_snapped_is_measured_and_null_under_dry_run(self):
-        """keyframe_snapped is true for every stream copy; start_snapped says whether the copied
-        picture really starts away from --start. Matroska keeps no edit list, so a copy from 2 s
+        """start_snapped (and, since 3.0.0, keyframe_snapped) says whether the copied picture
+        really starts away from --start. Matroska keeps no edit list, so a copy from 2 s
         starts at the keyframe at 0; a copy from 0 starts where asked; a dry run measures nothing."""
         out = OUT / "cut_start_snapped.mkv"
         data = json.loads(script("cut.py", self.src, "--start", "2", "--end", "6", "--tolerance", "-1", "-o", out, "--json").stdout)
@@ -188,11 +227,11 @@ class EditingTests(MediaFixtures):
         self.assertFalse(data["edit_list"])
         out2 = OUT / "cut_start_exact.mkv"
         data2 = json.loads(script("cut.py", self.src, "--start", "0", "--end", "2", "--tolerance", "-1", "-o", out2, "--json").stdout)
-        self.assertTrue(data2["keyframe_snapped"])
+        self.assertFalse(data2["keyframe_snapped"])
         self.assertFalse(data2["start_snapped"])
         data3 = json.loads(script("cut.py", self.src, "--start", "2", "--end", "6", "--dry-run", "-o", OUT / "never_snapped.mkv", "--json").stdout)
-        self.assertTrue(data3["keyframe_snapped"], "a planned stream copy")
         self.assertIsNone(data3["start_snapped"], "nothing was cut, so nothing was measured")
+        self.assertIsNone(data3["keyframe_snapped"])
 
     def test_cut_matroska_copy_keyframe_snap_reports_a_real_nonzero_delta(self):
         """The same divergence in Matroska, which has no edit lists: the copy really starts at the
@@ -617,6 +656,32 @@ class EditingTests(MediaFixtures):
         m = probe(str(out))
         self.assertClose(m["duration"], 15.0, 0.3)
 
+    def test_pad_with_sound_is_one_filter_graph(self):
+        """FFmpeg 8.0.1's scheduler (and conda-forge's 7.1.1) deadlocks (no CPU, until --timeout) when one demuxer feeds
+        a -vf graph and an -af graph whose audio both delays its start and pads its tail: pad.py
+        hung for 1800 s on Ubuntu 26.04's 8.0.1 (and on conda-forge's 7.1.1 before it). Both
+        streams now go through one -filter_complex, which runs on every release. That graph gets
+        no even scale from run()'s retry, so pad.py adds it for an odd-sized source itself."""
+        doc = json.loads(script("pad.py", self.src, "--start", "1", "--end", "2", "--dry-run", "--json",
+                                "-o", OUT / "pad_plan.mp4").stdout)
+        cmd = doc["commands"][-1]
+        self.assertIn("-filter_complex", cmd)
+        self.assertNotIn(" -af ", cmd)
+        self.assertNotIn(" -vf ", cmd)
+        odd = OUT / "pad_odd_in.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=641x359:rate=30",
+           "-f", "lavfi", "-i", "sine=f=440:r=48000", "-t", "2", "-pix_fmt", "yuv444p", "-c:v", "libx264",
+           "-preset", "veryfast", "-c:a", "aac", odd)
+        out = OUT / "pad_odd.mp4"
+        script("pad.py", odd, "--start", "1", "--end", "1", "--color", "0x2878C8", "--preset", "veryfast", "-o", out)
+        m = probe(str(out))
+        self.assertEqual((m["video"]["width"] % 2, m["video"]["height"] % 2), (0, 0))
+        self.assertClose(m["duration"], 4.0, 0.15)
+        streams = json.loads(sh("ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
+                                "-of", "json", out).stdout)["streams"]
+        lengths = {s["codec_type"]: float(s["duration"]) for s in streams}
+        self.assertClose(lengths["audio"], lengths["video"], 0.1)
+
     def test_pad_nothing_refused(self):
         script("pad.py", self.src, expect_fail=True)
 
@@ -883,6 +948,11 @@ class EditingTests(MediaFixtures):
         proc = script("sequence.py", "--dir", frames_dir, "--pattern", "frame_%04d.png", "--fps", "5",
                       "-o", OUT / "seq_gap.mp4")
         self.assertIn("frame_0002.png is missing; 2 later frame(s)", proc.stderr)
+        # the gap reaches the document too, not only stderr
+        proc = script("sequence.py", "--dir", frames_dir, "--pattern", "frame_%04d.png", "--fps", "5",
+                      "-o", OUT / "seq_gap_plan.mp4", "--dry-run", "--json")
+        gap = json.loads(proc.stdout)["diagnostics"]["warnings"][0]
+        self.assertEqual((gap["code"], gap["missing"], gap["frames_left_out"]), ("sequence_gap", "frame_0002.png", 2))
 
     def test_sequence_glob_pattern(self):
         frames_dir = OUT / "seqframes_glob"
@@ -961,7 +1031,7 @@ class EditingTests(MediaFixtures):
     def test_vfr_is_conformed_to_cfr_on_cut_and_fit(self):
         out = OUT / "vfr_cut.mp4"
         proc = script("cut.py", self.vfr, "--start", "2", "--end", "6", "-o", out)
-        self.assertIn("variable-frame-rate", proc.stderr)
+        self.assertIn("timing is variable", proc.stderr)
         m = probe(str(out))
         self.assertFalse(m["video"]["variable_frame_rate_suspected"])
         self.assertClose(m["duration"], 4.0, 0.2)
@@ -1002,17 +1072,42 @@ class EditingTests(MediaFixtures):
         self.assertEqual(none["silences"], [])
         self.assertIn("--threshold", none["hint"])
         self.assertIn("mean level", none["hint"])
-        self.assertClose(data["removed_seconds"], 5.25, 0.3)
+        # three 2 s gaps; --margin keeps 0.2 s of each on both sides (0.15 s before 2.22, when this
+        # was 5.25 s removed and 6.75 s kept)
+        self.assertClose(data["removed_seconds"], 4.9, 0.3)
         out = OUT / "tight.mp4"
         edl = OUT / "keep.txt"
         script("silence.py", gappy, "--preset", "veryfast", "--edl", edl, "-o", out)
-        self.assertClose(probe(str(out))["duration"], 6.75, 0.3)
+        self.assertClose(probe(str(out))["duration"], 7.1, 0.3)
         self.assertEqual(len(edl.read_text().strip().splitlines()), 3)
         # the EDL feeds cut.py --segments directly
         segs = ",".join(edl.read_text().split())
         out2 = OUT / "tight_via_cut.mp4"
         script("cut.py", gappy, "--segments", segs, "--accurate", "--preset", "veryfast", "-o", out2)
-        self.assertClose(probe(str(out2))["duration"], 6.75, 0.4)
+        self.assertClose(probe(str(out2))["duration"], 7.1, 0.4)
+
+    def test_silence_removal_cuts_the_sound_with_the_picture(self):
+        """FFmpeg 8.0 and 8.0.1 (Ubuntu 26.04) ship an `aselect` that passes every frame through (its
+        activate callback was lost when the filter was converted; fixed in 8.0.2/8.1), so silence.py
+        cut the picture to 6.75 s and left the sound at 12 s. The container duration is the longer
+        stream, so each stream is measured here. The sound is selected through ametadata (tag the
+        frames the expression keeps, keep the tagged ones), which behaves the same on every release,
+        and is never planned through aselect again."""
+        gappy = OUT / "gappy_streams.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+           "-f", "lavfi", "-i", "aevalsrc='0.5*sin(2*PI*440*t)*gt(sin(2*PI*0.25*t)\\,0)':s=48000",
+           "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-t", "12", "-c:v", "libx264", "-preset", "veryfast",
+           "-c:a", "aac", gappy)
+        plan = json.loads(script("silence.py", gappy, "--dry-run", "--json", "-o", OUT / "tight_plan.mp4").stdout)
+        self.assertNotIn("aselect", plan["commands"][-1])
+        for name in ("tight_streams.mp4", "tight_streams.m4a"):
+            out = OUT / name
+            script("silence.py", gappy, "--preset", "veryfast", "-o", out)
+            streams = json.loads(sh("ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
+                                    "-of", "json", out).stdout)["streams"]
+            for s in streams:
+                # 7.1 s at the 2.22 default --margin 0.2 (6.75 s at 0.15)
+                self.assertClose(float(s["duration"]), 7.1, 0.1, f"{name} {s['codec_type']}")
 
     def test_silence_on_wav_input_keeps_pcm_not_forced_aac(self):
         """silence.py's final ffmpeg command used to unconditionally append aac_args() (-c:a aac)
@@ -1046,6 +1141,176 @@ class EditingTests(MediaFixtures):
         script("join.py", self.src, silent, "--transition", "none", "--preset", "veryfast", "-o", out2)
         self.assertClose(probe(str(out2))["duration"], 16.0, 0.3)
         script("join.py", self.src, expect_fail=True)
+
+    def test_join_copy_joins_matching_clips_and_refuses_a_mismatch(self):
+        """2.24: --copy --transition none joins clips with matching streams by stream copy (the
+        joined packets are the clips' packets, nothing re-encoded), and refuses a clip that differs,
+        or a picture and sound that end apart, by name and before anything is written."""
+        clips = [self._av_clip(OUT / f"copy_{i}.mp4", 2, 2, 300 + 200 * i) for i in range(3)]
+        out = OUT / "copy_joined.mp4"
+        doc = json.loads(script("join.py", *clips, "--copy", "--transition", "none", "-o", out, "--overwrite", "--json").stdout)
+        self.assertEqual((doc["status"], doc["mode"], doc["verified"]), ("completed", "copy", True), doc)
+        packets = {v["property"]: v for v in doc["verification"] if v.get("step") == "join"}
+        self.assertTrue(packets["video_packets"]["ok"] and packets["video_packets"]["measured"] == 3 * 60, packets)
+        self.assertNotIn("libx264", " ".join(doc["commands"]))
+        self.assertClose(probe(str(out))["video"]["duration"], 6.0, 0.1)
+        wide = OUT / "copy_wide.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=96x48:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=d=2", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", wide)
+        short = self._av_clip(OUT / "copy_short_sound.mp4", 2, 1, 500)
+        for other, what in ((wide, "width 96 (not 64)"), (short, "audio")):
+            bad = OUT / "copy_bad.mp4"
+            proc = script("join.py", clips[0], other, "--copy", "--transition", "none", "-o", bad, "--json", expect_fail=True)
+            err = json.loads(proc.stdout)["error"]
+            self.assertEqual((err["kind"], err["reason"]), ("input", "join_copy_mismatch"), err)
+            self.assertIn(what, err["message"])
+            self.assertFalse(bad.exists())
+        proc = script("join.py", *clips[:2], "--copy", "-o", OUT / "copy_fade.mp4", "--json", expect_fail=True)
+        self.assertIn("--transition none", json.loads(proc.stdout)["error"]["message"])
+        proc = script("join.py", *clips[:2], "--copy", "--transition", "none", "--channels", "1", "-o", OUT / "copy_mono.mp4",
+                      "--json", expect_fail=True)
+        self.assertIn("--channels", json.loads(proc.stdout)["error"]["message"])
+        # equal lengths, but the sound starts 0.3 s late: it ends 0.3 s after the picture
+        late = OUT / "copy_late_sound.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x48:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=f=700:d=2", "-filter_complex", "[1]adelay=300:all=1,atrim=0:2.3,asetpts=PTS-STARTPTS[a]",
+           "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-output_ts_offset", "0", late)
+        proc = script("join.py", clips[0], late, "--copy", "--transition", "none", "-o", OUT / "copy_late.mp4", "--json", expect_fail=True)
+        self.assertEqual(json.loads(proc.stdout)["error"]["reason"], "join_copy_mismatch")
+        # equal ends, but the picture starts 0.3 s after the sound
+        offset = OUT / "copy_late_picture.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-itsoffset", "0.3", "-f", "lavfi", "-i",
+           "color=c=gray:s=64x48:r=30:d=1.7", "-f", "lavfi", "-i", "sine=f=700:d=2", "-map", "0:v", "-map", "1:a",
+           "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-fps_mode", "passthrough", offset)
+        proc = script("join.py", clips[0], offset, "--copy", "--transition", "none", "-o", OUT / "copy_offset.mp4", "--json", expect_fail=True)
+        self.assertIn("start or end", json.loads(proc.stdout)["error"]["message"])
+        # Matroska states no stream length, but a start gap is still caught
+        mk_ok, mk_late = OUT / "copy_ok.mkv", OUT / "copy_late_picture.mkv"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", clips[0], "-c", "copy", mk_ok)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", offset, "-c", "copy", mk_late)
+        proc = script("join.py", mk_ok, mk_late, "--copy", "--transition", "none", "-o", OUT / "copy_offset.mkv", "--json", expect_fail=True)
+        self.assertIn("start or end", json.loads(proc.stdout)["error"]["message"])
+        # a cover picture between the video and the sound moves the audio to another stream index
+        cover_img = OUT / "copy_cover.png"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=32x32", "-frames:v", "1", cover_img)
+        covered = OUT / "copy_covered.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", clips[1], "-i", cover_img, "-map", "0:v", "-map", "1",
+           "-map", "0:a", "-c:v:0", "copy", "-c:v:1", "png", "-disposition:v:1", "attached_pic", "-c:a", "copy", covered)
+        proc = script("join.py", clips[0], covered, "--copy", "--transition", "none", "-o", OUT / "copy_cover_join.mp4",
+                      "--json", expect_fail=True)
+        err = json.loads(proc.stdout)["error"]
+        self.assertEqual(err["reason"], "join_copy_mismatch", err)
+        self.assertIn("lay(s) out their streams", err["message"])
+        # a silent clip is placed in the copy join's output, as in a re-encoded one
+        quiet = OUT / "copy_quiet.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x48:r=30:d=2",
+           "-f", "lavfi", "-i", "sine=f=500:d=2", "-af", "volume=0", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", quiet)
+        doc = json.loads(script("join.py", clips[0], quiet, clips[1], "--copy", "--transition", "none", "-o",
+                                OUT / "copy_with_quiet.mp4", "--overwrite", "--json").stdout)
+        self.assertEqual([(s["at"], s["end"]) for s in doc["silent"]], [(2.0, 4.0)], doc.get("silent"))
+
+    def test_join_copy_measures_stream_spans_in_every_container(self):
+        """2.24.1: the A/V end check read stated stream lengths, which Matroska/WebM never state (a
+        1.5 s hole in the sound passed as verified) and MPEG-TS only estimate (every AAC .ts was
+        refused); identical VP9 WebM clips were refused over "extradata"; --codec was silently
+        ignored; dropped subtitle tracks were not reported."""
+        a, b = self._av_clip(OUT / "span_a.mp4", 2, 2, 300), self._av_clip(OUT / "span_b.mp4", 2, 2, 500)
+        short = self._av_clip(OUT / "span_short.mp4", 3, 1.5, 700)
+        mka = {}
+        for name, src in (("a", a), ("b", b), ("short", short)):
+            mka[name] = OUT / f"span_{name}.mkv"
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-c", "copy", mka[name])
+        proc = script("join.py", mka["short"], mka["b"], "--copy", "--transition", "none", "-o", OUT / "span_bad.mkv",
+                      "--json", expect_fail=True)
+        self.assertEqual(json.loads(proc.stdout)["error"]["reason"], "join_copy_mismatch")
+        ts = []
+        for src in (a, b):
+            t = OUT / (src.stem + ".ts")
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-c", "copy", t)
+            ts.append(t)
+        if subprocess.run(["ffprobe", "-v", "error", "-show_format", str(ts[0])], capture_output=True).returncode == 0:
+            # the static ffprobe 5.1.1 build cannot read MPEG-TS at all
+            doc = json.loads(script("join.py", *ts, "--copy", "--transition", "none", "-o", OUT / "span_ts.ts",
+                                    "--overwrite", "--json").stdout)
+            self.assertTrue(doc["verified"], doc)
+        webm = []
+        for i in range(2):
+            w = OUT / f"span_{i}.webm"
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x48:r=30:d=1",
+               "-f", "lavfi", "-i", "sine=d=1", "-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", w)
+            webm.append(w)
+        doc = json.loads(script("join.py", *webm, "--copy", "--transition", "none", "-o", OUT / "span_vp9.webm",
+                                "--overwrite", "--json").stdout)
+        self.assertEqual((doc["mode"], doc["verified"]), ("copy", True), doc)
+        proc = script("join.py", a, b, "--copy", "--transition", "none", "--codec", "hevc", "-o", OUT / "span_hevc.mp4",
+                      "--json", expect_fail=True)
+        self.assertIn("--codec", json.loads(proc.stdout)["error"]["message"])
+        default_quality = re.search(r"--quality N.*?default (\d+)", script("join.py", "--help").stdout, re.S)
+        for value in ([default_quality.group(1)] if default_quality else []) + ["30"]:
+            proc = script("join.py", a, b, "--copy", "--transition", "none", "--quality", value, "-o", OUT / "span_q.mp4",
+                          "--json", expect_fail=True)
+            self.assertIn("--quality", json.loads(proc.stdout)["error"]["message"])
+        sys.path.insert(0, str(SCRIPTS))
+        import join as join_mod
+        from unittest import mock
+        def listing(*packets):
+            return mock.patch.object(join_mod, "run", return_value=subprocess.CompletedProcess(
+                [], 0, json.dumps({"packets": list(packets)}), ""))
+        with listing({"pts_time": "0.000000", "duration_time": "0.033"}, {"duration_time": "0.033"}):
+            self.assertIsNone(join_mod._stream_span("x.mkv", "V"))
+        # a packet without a pts is placed by its dts
+        with listing({"pts_time": "0.000000", "duration_time": "0.5"}, {"dts_time": "0.500000", "duration_time": "0.5"}):
+            self.assertEqual(join_mod._stream_span("x.mkv", "V"), (0.0, 1.0))
+        # a long clip: the head and the tail are read, and give the same span as every packet
+        long_clip = self._av_clip(OUT / "span_long.mp4", 40, 40, 440)
+        head_tail = join_mod._stream_span(str(long_clip), "V", 40.0)
+        whole = join_mod._stream_span(str(long_clip), "V", 0.0)
+        self.assertEqual(head_tail, whole)
+        # the tail is sought from the file's start time: a clip whose clock starts at 100 s
+        late = OUT / "span_late.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", long_clip, "-c", "copy",
+           "-output_ts_offset", "100", late)
+        start = float(probe(str(late)).get("start_time") or 0.0)
+        self.assertGreater(start, 50)
+        self.assertEqual(join_mod._stream_span(str(late), "V", 40.0, start), join_mod._stream_span(str(late), "V", 0.0))
+        subs = []
+        for src in (a, b):
+            t = OUT / (src.stem + "_sub.mp4")
+            srt = OUT / "span.srt"
+            srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-i", srt, "-map", "0", "-map", "1",
+               "-c", "copy", "-c:s", "mov_text", t)
+            subs.append(t)
+        doc = json.loads(script("join.py", *subs, "--copy", "--transition", "none", "-o", OUT / "span_subs.mp4",
+                                "--overwrite", "--json").stdout)
+        self.assertIs(doc.get("dropped_non_av_streams"), True, doc)
+
+    def test_cut_remove_outside_the_file_is_refused(self):
+        """2.24.1: --remove 15-20 on a 4 s file kept a range past the end and removed nothing, silently."""
+        src = self._av_clip(OUT / "remove_outside.mp4", 4, 4, 400)
+        proc = script("cut.py", src, "--remove", "15-20", "-o", OUT / "remove_outside_out.mp4", "--json", expect_fail=True)
+        self.assertIn("outside the file", json.loads(proc.stdout)["error"]["message"])
+
+    def test_cut_remove_keeps_the_rest(self):
+        """2.24: --remove is --segments written the other way: dropping 1-2 and 3.5-4 (overlapping
+        3.8-4 merged) from 6 s keeps 0-1, 2-3.5 and 4-6."""
+        clip = self._av_clip(OUT / "remove_src.mp4", 6, 6, 440)
+        out = OUT / "removed.mp4"
+        doc = json.loads(script("cut.py", clip, "--remove", "3.5-4,1-2,3.8-4", "--accurate", "-o", out, "--overwrite", "--json").stdout)
+        self.assertEqual(doc["status"], "completed", doc)
+        self.assertClose(probe(str(out))["video"]["duration"], 4.5, 0.1)
+        proc = script("cut.py", clip, "--remove", "0-10", "-o", OUT / "removed_all.mp4", "--json", expect_fail=True)
+        self.assertIn("nothing would be left", json.loads(proc.stdout)["error"]["message"])
+        for extra in (["--segments", "0-1"], ["--start", "0"]):
+            proc = script("cut.py", clip, "--remove", "1-2", *extra, "-o", OUT / "removed_mix.mp4", "--json", expect_fail=True)
+            self.assertIn("does not combine", json.loads(proc.stdout)["error"]["message"])
+        proc = script("cut.py", clip, "--remove", "1-2", "--snap", "beats", "-o", OUT / "removed_snap.mp4", "--json", expect_fail=True)
+        self.assertIn("--snap beats", json.loads(proc.stdout)["error"]["message"])
+        # a range starting before 0 is clamped to the file, not refused: dropping -1..2 keeps 2-6
+        lead = OUT / "removed_lead.mp4"
+        doc = json.loads(script("cut.py", clip, "--remove=-1-2", "--accurate", "-o", lead, "--overwrite", "--json").stdout)
+        self.assertEqual(doc["status"], "completed", doc)
+        self.assertClose(probe(str(lead))["video"]["duration"], 4.0, 0.1)
 
     def _av_clip(self, out, picture, tone, freq, fps=30):
         """A tiny clip: `picture` s of colour at `fps`, `tone` s of a sine at `freq` Hz, AAC audio."""
@@ -2175,6 +2440,21 @@ class EditingTests(MediaFixtures):
                                 "--json").stdout)["filler"]
         self.assertEqual((fil["lang"], fil["removed_words"]), ("ja", ["えー"]))
 
+    def test_filler_takes_a_korean_or_chinese_transcript_by_code_or_name(self):
+        """2.19: ko and zh have built-in lists, so "kor", "zh-CN" and "chinese" are no longer
+        refused; "chinese" used to be cut to the two letters "ch"."""
+        for lang, word, expected in (("kor", "음", "ko"), ("ko-KR", "어", "ko"), ("zh-CN", "嗯，", "zh"),
+                                     ("chinese", "呃", "zh"), ("spanish", "eh", "es")):
+            with self.subTest(lang=lang):
+                doc = OUT / "words_lang_more.json"
+                doc.write_text(json.dumps({"language": lang, "words": [
+                    {"word": word, "start": 0.2, "end": 0.5}, {"word": "x", "start": 0.7, "end": 0.9}]}),
+                    encoding="utf-8")
+                fil = json.loads(script("silence.py", self._gappy(), "--filler", "--words", doc, "--filler-list",
+                                        "--json").stdout)["filler"]
+                self.assertEqual(fil["lang"], expected)
+                self.assertEqual(fil["removed_count"], 1)
+
     def test_an_unlisted_three_letter_code_is_refused_not_read_as_its_two_letter_prefix(self):
         """est is Estonian: it has no built-in list, so it is refused. Cutting it to "es" would run the
         Spanish list on Estonian speech."""
@@ -2297,6 +2577,111 @@ class FillerSpansTests(unittest.TestCase):
             self._w(("\u3048\u30fc\u3068", 1.0, 1.3), ("\u3042\u306e", 2.0, 2.2), ("\u3042\u306e\u3072\u3068", 3.0, 3.4)), ja)
         self.assertEqual([s["word"] for s in spans], ["\u3048\u30fc\u3068", "\u3042\u306e"])
 
+    def test_a_filler_split_across_whisper_tokens_is_one_word(self):
+        """2.19: whisper splits Japanese and Chinese into tokens, not words -- its own vocabulary
+        turns えーと into えー + と and えっと into え + っと, so the list's えーと/えっと never
+        matched one token. A run of tokens that joins to a listed word is that word; the longest
+        run wins, so えーと is cut whole rather than えー with と left behind."""
+        ja = self.D.FILLER_WORDS["ja"]
+        spans = self.D.filler_spans(self._w(("えー", 1.0, 1.2), ("と", 1.2, 1.3), ("、", 1.3, 1.3),
+                                            ("今日", 1.6, 1.8), ("え", 2.5, 2.6), ("っと", 2.6, 2.8)), ja, pad=0.0)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans],
+                         [("えーと", 1.0, 1.3), ("えっと", 2.5, 2.8)])
+
+    def test_an_unspaced_filler_needs_a_word_boundary_on_each_side(self):
+        """The same token split means a listed character can be part of a longer word: あの + 人
+        is "that person", 我 + 嗯 + 是 runs straight through. A run in an unspaced script is cut
+        only with a boundary on both sides: punctuation, a pause of FILLER_BOUNDARY_GAP, the
+        transcript's edge or a spaced-script neighbour."""
+        ja, zh = self.D.FILLER_WORDS["ja"], self.D.FILLER_WORDS["zh"]
+        self.assertEqual(self.D.filler_spans(self._w(("あの", 1.0, 1.2), ("人", 1.2, 1.4)), ja), [])
+        self.assertEqual(self.D.filler_spans(self._w(("我", 1.0, 1.1), ("嗯", 1.1, 1.2), ("是", 1.2, 1.3)), zh), [])
+        cut = self.D.filler_spans(self._w(("我", 1.0, 1.1), ("嗯，", 1.3, 1.5), ("是", 1.5, 1.6)), zh, pad=0.0)
+        self.assertEqual([s["word"] for s in cut], ["嗯"])
+        # faster-whisper attaches the comma to the word before it; that is a boundary too
+        cut = self.D.filler_spans(self._w(("呃", 0.0, 0.2), ("那个", 0.2, 0.5)), zh | {"那个"}, pad=0.0)
+        self.assertEqual([s["word"] for s in cut], [], "two listed words with no boundary between them stay")
+
+    def test_korean_is_spaced_and_matches_whole_words(self):
+        ko = self.D.FILLER_WORDS["ko"]
+        spans = self.D.filler_spans(self._w(("음,", 0.5, 0.8), ("음악은", 1.0, 1.5), ("어", 2.0, 2.2), ("좋아요", 2.2, 2.6)), ko)
+        self.assertEqual([s["word"] for s in spans], ["음", "어"])
+        self.assertNotIn("저", ko, "저 is also 'I': a discourse marker, not a default")
+        self.assertIn("저", self.D.FILLER_DISCOURSE_MARKERS["ko"])
+
+    def test_a_two_word_discourse_marker_added_with_filler_extra_matches(self):
+        """--help offers 'you know' for --filler-extra, but one engine word is one word, so the
+        two-word phrase could never match before 2.19."""
+        spans = self.D.filler_spans(self._w(("So", 0.0, 0.3), ("you", 0.5, 0.7), ("know", 0.7, 0.9), ("it", 1.0, 1.2)),
+                                    {"you know"}, pad=0.0)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans], [("you know", 0.5, 0.9)])
+
+    def test_punctuation_inside_a_run_ends_the_word(self):
+        """えー、と is a filler and then a particle, not えーと: the comma is a word boundary, so
+        only えー goes and と is kept. The same holds for "you, know"."""
+        ja = self.D.FILLER_WORDS["ja"]
+        spans = self.D.filler_spans(self._w(("えー、", 1.0, 1.2), ("と", 1.2, 1.3)), ja, pad=0.0)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans], [("えー", 1.0, 1.2)])
+        self.assertEqual(self.D.filler_spans(self._w(("you,", 0.5, 0.7), ("know", 0.7, 0.9)), {"you know"}), [])
+
+    def test_a_pause_inside_an_unspaced_run_ends_the_word(self):
+        """えー, a 0.2 s pause, then と is a filler and then a particle: the pause is a word
+        boundary, so only えー goes and the pause and と stay."""
+        ja = self.D.FILLER_WORDS["ja"]
+        spans = self.D.filler_spans(self._w(("えー", 1.0, 1.2), ("と", 1.4, 1.5)), ja, pad=0.0)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans], [("えー", 1.0, 1.2)])
+
+    def test_han_extension_characters_are_unspaced(self):
+        """U+20000 and up (Extensions B-H) are Han too: 嗯 glued to one is part of a word."""
+        zh = self.D.FILLER_WORDS["zh"]
+        self.assertTrue(self.D._unspaced_script("\U00020000"))
+        self.assertEqual(self.D.filler_spans(self._w(("我", 0.0, 0.1), ("嗯", 0.1, 0.2), ("\U00020000", 0.2, 0.3)), zh), [])
+
+    def test_a_rejected_longer_phrase_does_not_hide_a_listed_word(self):
+        """--filler-extra "um huh" held for 3 s is too long to be a filler, but the "um" at its
+        start is a filler of its own: it is still cut, and nothing is counted as too long."""
+        stats = {}
+        spans = self.D.filler_spans(self._w(("um", 1.0, 1.2), ("huh", 1.2, 4.0)), {"um", "um huh"},
+                                    pad=0.0, stats=stats)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans], [("um", 1.0, 1.2)])
+        self.assertEqual(stats["matched_too_long"], 0)
+        # and a listed word at its end: a held "uhhh" then "um" -- the phrase is too long, the um is not
+        stats = {}
+        spans = self.D.filler_spans(self._w(("uhhh", 1.0, 3.9), ("um", 3.9, 4.1)), {"um", "uhhh um"},
+                                    pad=0.0, stats=stats)
+        self.assertEqual([(s["word"], s["start"], s["end"]) for s in spans], [("um", 3.9, 4.1)])
+        self.assertEqual(stats["matched_too_long"], 1)
+        stats = {}
+        self.assertEqual(self.D.filler_spans(self._w(("uhhh", 1.0, 3.0)), {"uhhh"}, stats=stats), [])
+        self.assertEqual(stats["matched_too_long"], 1)
+
+    def test_a_run_listed_out_of_time_order_is_untimed(self):
+        """A run whose last token ends before its first starts has no span to cut; cutting it
+        would hand keep_ranges an inverted range."""
+        stats = {}
+        spans = self.D.filler_spans(self._w(("you", 1.0, 1.2), ("know", 0.5, 0.7)), {"you know"}, stats=stats)
+        self.assertEqual(spans, [])
+        self.assertEqual(stats["matched_untimed"], 1)
+
+    def test_the_reference_table_lists_every_built_in_list_word_for_word(self):
+        """references/scripts.md restates FILLER_WORDS as a table; a language added to one and
+        not the other leaves a reader with no row to look up."""
+        text = (SCRIPTS.parent / "references" / "scripts.md").read_text(encoding="utf-8")
+        table = text.split("Built-in lists, one per language:", 1)[1].split("\n\n", 2)[1]
+        rows = {}
+        for line in table.splitlines()[2:]:
+            lang, words = [c.strip() for c in line.strip("|").split("|")]
+            rows[lang] = {w.strip() for w in words.split(",")}
+        self.assertEqual(rows, {k: set(v) for k, v in self.D.FILLER_WORDS.items()})
+
+    def test_every_new_language_list_holds_disfluencies_only(self):
+        """2.19 adds ko, zh, ru, nl, pl and tr. No list carries a word its own language uses as
+        content; those are discourse markers, reachable with --filler-extra."""
+        for lang in ("ko", "zh", "ru", "nl", "pl", "tr"):
+            self.assertTrue(self.D.FILLER_WORDS[lang], lang)
+            self.assertFalse(self.D.FILLER_WORDS[lang] & set(self.D.FILLER_DISCOURSE_MARKERS[lang]), lang)
+        self.assertNotIn("额", self.D.FILLER_WORDS["zh"], "额 is a common character in its own right")
+
     def test_like_is_not_a_default_filler_word(self):
         """A discourse marker is a content word: cutting it cuts meaning, which is a judgement
         this skill does not make. It is reachable with --filler-extra and documented."""
@@ -2323,6 +2708,26 @@ class FillerSpansTests(unittest.TestCase):
         self.assertAlmostEqual(words[0]["start"], 0.2, places=6)
         self.assertAlmostEqual(words[1]["end"], 1.1, places=6)      # glued span ends at the tail
         self.assertEqual(asr._words_from_whisper_cpp_json(str(OUT / "nope.json")), [])
+        # Japanese and Chinese have no spaces, so every token "continues" the one before: between
+        # two whole characters the tokens stay apart, a partial character (U+FFFD) is still glued
+        doc.write_text(json.dumps({"transcription": [{"tokens": [
+            {"text": "えー", "offsets": {"from": 0, "to": 200}},
+            {"text": "と", "offsets": {"from": 200, "to": 300}},
+            {"text": "\ufffd", "offsets": {"from": 300, "to": 350}},
+            {"text": "\ufffd今日", "offsets": {"from": 350, "to": 600}},
+        ]}]}), encoding="utf-8")
+        self.assertEqual([w["word"] for w in asr._words_from_whisper_cpp_json(str(doc))],
+                         ["えー", "と\ufffd\ufffd今日"])
+        # a full-width comma token stays with the word before it and ends it: 嗯，+ 呃, not 嗯，呃
+        doc.write_text(json.dumps({"transcription": [{"tokens": [
+            {"text": "嗯", "offsets": {"from": 0, "to": 200}},
+            {"text": "，", "offsets": {"from": 200, "to": 200}},
+            {"text": "呃", "offsets": {"from": 400, "to": 600}},
+        ]}]}), encoding="utf-8")
+        words = asr._words_from_whisper_cpp_json(str(doc))
+        self.assertEqual([w["word"] for w in words], ["嗯，", "呃"])
+        self.assertEqual([s["word"] for s in self.D.filler_spans(words, self.D.FILLER_WORDS["zh"], pad=0.0)],
+                         ["嗯", "呃"])
 
     def test_openai_whisper_json_becomes_word_timings(self):
         import importlib

@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from _platforms import PLATFORMS, PLATFORM_CHOICES, resolve as resolve_platform
-from _common import STATE, require_tool, add_common, apply_common, default_font_file, die, emit, escape_drawtext, escape_filter_path, ffmpeg_base, info, parse_time, probe, run, run_analysis, time_arg
+from _common import STATE, require_tool, add_common, apply_common, default_font_file, die, emit, escape_drawtext, ffmpeg_base, info, parse_time, probe, run, run_analysis, time_arg
+from _common import drawtext_fontfile  # noqa: E402
 
 FONT = "fontcolor=white:fontsize=h/18:box=1:boxcolor=black@0.55:boxborderw=6:x=8:y=8"
 
@@ -28,7 +29,12 @@ def fmt_hms(sec: float) -> str:
     return f"{int(h):02d}:{int(m):02d}:{s_:06.3f}"
 
 
-def timecode_filter(font_prefix: str) -> str:
+def timecode_filter(font_prefix: str, offset: float = 0.0) -> str:
+    """Burned-in timecode. `offset` is added to each frame's pts: an input-side -ss resets
+    timestamps to 0 at the seek point, so a sheet that starts reading mid-slice must add the seek
+    back or every tile is labelled `offset` seconds early (the contact sheet below seeks step/2)."""
+    if offset > 0:
+        return f"drawtext=text='%{{pts\\:hms\\:{offset:.6f}}}':{font_prefix}{FONT}"
     return f"drawtext=text='%{{pts\\:hms}}':{font_prefix}{FONT}"
 
 
@@ -156,9 +162,12 @@ def main() -> int:
     # a resolvable font file, given as fontfile=, is the only form confirmed not to crash drawtext's
     # own fontconfig resolution on some real Windows ffmpeg builds (#100); font= is the fallback when
     # nothing can be resolved, unchanged from before this existed.
-    default_font = default_font_file("DejaVu Sans")
-    font_prefix = f"fontfile={escape_filter_path(default_font)}:" if default_font else ""
-    tc = "" if args.no_timecode else "," + timecode_filter(font_prefix)
+    if args.no_timecode:
+        font_prefix, tc = "", ""   # nothing is drawn, so no font is resolved or copied
+    else:
+        default_font = default_font_file("DejaVu Sans")
+        font_prefix = f"{drawtext_fontfile(default_font)}:" if default_font else ""
+        tc = "," + timecode_filter(font_prefix)
     # --safe: the platform's occluded zones, drawn as shaded boxes in fractions of the frame so
     # the same filter is right at any scale (a tile of a contact sheet as much as a full frame).
     safe_filter = ""
@@ -256,10 +265,12 @@ def main() -> int:
         tile_w = max(2, (args.width // cols) // 2 * 2)
         out = args.output or os.path.join(outdir, f"{stem}_sheet.png")
         # sample at the middle of each slice so the first/last tiles are not black lead-in/out frames
-        vf = (f"select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{step * 0.98:.6f})',scale={tile_w}:-2{tc},"
-              f"tile={cols}x{rows}:padding=2:margin=2:color=0x202020")
         # with only a handful of frames a mid-slice seek skips past them all: start at 0 instead
         seek = 0.0 if frames_avail < 4 else step / 2
+        # the seek resets pts to 0, so the burned-in timecode gets the seek added back
+        tc_sheet = tc.replace(timecode_filter(font_prefix), timecode_filter(font_prefix, seek)) if seek else tc
+        vf = (f"select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{step * 0.98:.6f})',scale={tile_w}:-2{tc_sheet},"
+              f"tile={cols}x{rows}:padding=2:margin=2:color=0x202020")
         cmd = ffmpeg_base() + ["-ss", f"{seek:.6f}", "-i", args.input, "-vf", vf, "-frames:v", "1", out]
         run(cmd)
         outputs.append(out)

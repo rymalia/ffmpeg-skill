@@ -591,6 +591,12 @@ class OrchestrationTests(MediaFixtures):
         out = json.loads(script("render.py", proj, "--fast", "--stop-after", "join", "--work", OUT / "rw", "--json").stdout)
         self.assertEqual(out["stages"], ["clips", "join"])
         self.assertTrue(Path(out["output"]).exists())
+        # 2.24.1: without --work the auto-named directory was removed at exit, deleting the file
+        # the result named (and described by output_identity)
+        out = json.loads(script("render.py", proj, "--fast", "--stop-after", "join", "--json").stdout)
+        self.assertTrue(Path(out["output"]).exists(), out["output"])
+        self.assertEqual(Path(out["output"]).stat().st_size, out["output_identity"]["size"])
+        shutil.rmtree(Path(out["output"]).parent, ignore_errors=True)
 
     def test_render_every_stage_flag_and_every_refusal(self):
         """render.py's stage branches that test_render_project does not take (silence, captions
@@ -1010,6 +1016,66 @@ class OrchestrationTests(MediaFixtures):
         plan = json.loads(script("render.py", proj, "--dry-run", "--json").stdout)
         self.assertEqual(plan["status"], "completed")
         self.assertIn("export", plan["stages"])
+
+    def test_render_result_keys_are_declared_in_the_contract(self):
+        """Every key a render result carries is in contract --json's render output_schema (the
+        contract is the authority on result fields): a full template run and an early stop."""
+        sys.path.insert(0, str(SCRIPTS))
+        import _contract
+        tool = [t for t in _contract.build(detect=False)["tools"] if t["name"] == "render"][0]
+        declared = set(tool["output_schema"]["properties"])
+        for extra in ([], ["--stop-after", "fit"]):
+            with self.subTest(extra=extra):
+                doc = json.loads(script("render.py", self.src, "--template", "reels", "--cues", self.cues,
+                                        "-o", OUT / "rk_out.mp4", "--dry-run", "--json", *extra).stdout)
+                self.assertEqual(sorted(set(doc) - declared), [])
+
+    def test_render_intermediate_stages_use_veryfast_only_before_an_encoding_export(self):
+        """2.15: the x264 stages before an encoding export run at --intermediate-preset (default
+        superfast since 2.16): export.py re-encodes them and its own preset sets the delivered quality. Kept
+        at the stages' medium when nothing re-encodes after them: --stop-after before the
+        export, a copy export, or --intermediate-preset medium. --fast still wins."""
+        proj = OUT / "ip_project.json"
+        script("render.py", self.src, "--template", "reels", "--cues", self.cues,
+               "--write-project", proj, "-o", OUT / "ip_out.mp4", "--json")
+
+        def presets(project, *extra):
+            doc = json.loads(script("render.py", project, "--dry-run", "--json", *extra).stdout)
+            x264 = [re.search(r"-preset (\S+)", c).group(1) for c in doc["commands"] if "-c:v libx264" in c]
+            return doc.get("intermediate_preset"), x264
+
+        used, x264 = presets(proj)
+        self.assertEqual(used, "superfast")
+        self.assertEqual(x264[-1], "medium", "the export keeps its preset")
+        self.assertTrue(x264[:-1] and set(x264[:-1]) == {"superfast"}, x264)
+        self.assertEqual(presets(proj, "--intermediate-preset", "medium"), (None, ["medium"] * len(x264)))
+        used, x264_fast = presets(proj, "--fast")
+        self.assertIsNone(used, "--fast decides every stage's preset, not --intermediate-preset")
+        self.assertEqual(set(x264_fast), {"veryfast"})
+        doc_stop = json.loads(script("render.py", proj, "--dry-run", "--json", "--stop-after", "captions").stdout)
+        self.assertIn("intermediate_preset", doc_stop, "an early stop reports the key too, as null")
+        used, x264_stop = presets(proj, "--stop-after", "captions")
+        self.assertIsNone(used)
+        self.assertEqual(set(x264_stop), {"medium"}, "a --stop-after output is what the caller keeps")
+        loaded = json.loads(proj.read_text())
+        loaded["export"] = {"preset": "copy"}
+        loaded.pop("check", None)
+        copy_proj = OUT / "ip_project_copy.json"
+        copy_proj.write_text(json.dumps(loaded), encoding="utf-8")
+        used, x264_copy = presets(copy_proj)
+        self.assertIsNone(used)
+        self.assertEqual(set(x264_copy), {"medium"}, "a copy export keeps the stages' encode")
+        # a project whose only encode is the export: nothing received the preset, so null
+        bare = OUT / "ip_project_bare.json"
+        bare.write_text(json.dumps({"clips": [{"src": str(self.src)}], "export": {"preset": "youtube"},
+                                    "output": str(OUT / "ip_bare.mp4")}), encoding="utf-8")
+        used, x264_bare = presets(bare)
+        self.assertIsNone(used, x264_bare)
+        # a pack runs one render per destination: each gets the caller's choice
+        pack = json.loads(script("render.py", self.src, "--template", "reels,shorts", "--cues", self.cues,
+                                 "--intermediate-preset", "medium", "-o", OUT / "ip_pack" / "x.mp4",
+                                 "--dry-run", "--json").stdout)
+        self.assertEqual(set(re.findall(r"-preset (\w+)", " ".join(pack["commands"]))), {"medium"})
 
     # --------------------------------------------- 1.17.1: the template path fits the caption size
     def _cw1_cues(self):

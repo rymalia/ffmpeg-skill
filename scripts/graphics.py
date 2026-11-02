@@ -29,18 +29,21 @@ import argparse
 import os
 import re
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from _platforms import PLATFORMS, PLATFORM_CHOICES, safe_margins_px, resolve as resolve_platform
 from _common import (aac_args, add_common, brand_caption_style, script_font_for_text, apply_common, cfr_args,
-                     color_hex, default_font_file, default_output, die, draws_chroma, drawn_chain, emit, escape_drawtext, escape_filter_path,
+                     color_hex, default_output, die, draws_chroma, drawn_chain, emit, escape_drawtext, escape_filter_path,
                      ffmpeg_base, info, label_chain, load_brand, parse_time, probe, rgb_chain_to_bt709, run, run_keeping_subtitles, video_args,
                      drawtext_boxborderw, drawtext_center_align, X264_PRESETS, time_arg, fmt_secs, STATE, drawtext_text_opts,
                      LANGUAGE_NAMES, needs_shaping, detect_script, BIDI_SCRIPTS, font_family_of_file, font_family_for_script, has_emoji,
                      emoji_clusters, emoji_codepoint_name, char_script, emoji_filter_chain, emoji_asset_for, emoji_support, resolve_emoji_assets,
                      EMOJI_ASSET_HINT, text_width_em, drawtext_shaping, wrap_text, WRAP_MODES,
-                     SAFE_WIDTH_FRACTION)
+                     SAFE_WIDTH_FRACTION, drawtext_draws_newline_glyph, is_multiline, _DRAWTEXT_PENDING)
+from _common.emit import warn
+from _common.fonts import font_choice, record_font_choice
 from _ass_overlay import text_overlay_ass, EMOJI_SENTINEL
+from _common import drawtext_fontfile  # noqa: E402
 
 # where the template's text chain goes in a filter_complex it builds (graphics.main fills it in)
 TEXT = "@TEXT@"
@@ -52,18 +55,21 @@ def ff_color(hex_rgb: str, alpha: float = 1.0) -> str:
     return f"0x{color_hex(hex_rgb)}@{alpha:g}"
 
 
-def font_opts(brand: dict, font: Optional[str], font_file: Optional[str], script_file: Optional[str] = None) -> str:
-    if font_file or brand.get("font_file"):
-        return f"fontfile={escape_filter_path(font_file or brand['font_file'])}"
-    if script_file:  # a font picked by the script of the text itself (1.12)
-        return f"fontfile={escape_filter_path(script_file)}"
-    resolved = default_font_file(font or brand.get("font", "DejaVu Sans"))
-    if resolved:
-        return f"fontfile={escape_filter_path(resolved)}"
-    return f"font='{escape_drawtext(font or brand.get('font', 'DejaVu Sans'))}'"
+def font_opts(brand: dict, font: Optional[str], font_file: Optional[str], script_file: Optional[str] = None,
+              script_family: Optional[str] = None, renderer: str = "drawtext") -> "Tuple[str, dict]":
+    """(the drawtext font option, the choice behind it -- the result's `font_used`): the caller's
+    file, a font picked by the script of the text itself (1.12), the asked family resolved to a
+    file, or the family by name when nothing resolves."""
+    choice = font_choice(font or brand.get("font", "DejaVu Sans"), font_file=font_file or brand.get("font_file"),
+                         script_file=script_file, script_family=script_family, renderer=renderer)
+    if choice["file"]:
+        return drawtext_fontfile(choice['file']), choice
+    return f"font='{escape_drawtext(font or brand.get('font', 'DejaVu Sans'))}'", choice
 
 
-def main() -> int:
+def main(force_route: Optional[str] = None) -> int:
+    """`force_route` is the second pass of an auto run whose drawtext labels came out multi-line on a
+    build that draws a box at every line break (see the check after the templates)."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
     ap.add_argument("-o", "--output", help="output file (default: <name>_gfx.<ext>)")
@@ -104,7 +110,8 @@ def main() -> int:
     ap.add_argument("--text-render", choices=["auto", "ass", "drawtext"], default="auto",
                     help="which renderer draws the template's text: 'auto' (default) uses libass for "
                          "scripts drawtext cannot shape (Devanagari, Bengali, Tamil, Thai, Lao ...) and for "
-                         "emoji overlays, and drawtext for everything else -- Latin/CJK/Arabic frames are "
+                         "emoji overlays, and for multi-line text on FFmpeg 8.0, 8.0.1 and 8.1.0 (their drawtext draws "
+                         "a box at each line break), and drawtext for everything else -- Latin/CJK/Arabic frames are "
                          "pixel-identical to 1.14 (the drawtext command itself changed: the label is "
                          "passed as textfile=, not text=); 'ass' always uses libass; 'drawtext' forces the old renderer and is "
                          "refused for a script it cannot shape")
@@ -153,7 +160,7 @@ def main() -> int:
     _script, script_file, _family = script_font_for_text(
         " ".join(t for t in (args.name, args.title, args.subtitle, args.text, args.top, args.bottom) if t),
         lang=args.lang, font=args.font, font_explicit=bool(args.font), font_file=args.font_file or brand.get("font_file"))
-    fo = font_opts(brand, args.font, args.font_file, script_file)
+    fo, font_used = font_opts(brand, args.font, args.font_file, script_file, _family)
 
     meta = probe(args.input)
     if not meta.get("video"):
@@ -244,6 +251,8 @@ def main() -> int:
             kind="input")
     route = "ass" if (args.text_render == "ass" or
                       (args.text_render == "auto" and (shaping or emoji_mode == "png"))) else "drawtext"
+    if force_route:
+        route = force_route
     # drawtext loads exactly ONE font file and has no fallback chain, so "whatever glyph the text
     # font has" for an emoji is an empty box on DejaVu Sans and on every script font: reporting
     # mode "mono" from the drawtext route is a claim the frame does not keep. libass DOES have a
@@ -258,8 +267,8 @@ def main() -> int:
                  "be drawn as an empty box -- stripped from the text instead "
                  "(--text-render auto renders it monochrome through libass)")
     if emoji_mode == "mono":
-        info("warning: emoji rendered monochrome (no colour path on this ffmpeg; "
-             "--emoji-assets DIR for colour). " + support["detail"])
+        warn("emoji rendered monochrome (no colour path on this ffmpeg; "
+             "--emoji-assets DIR for colour). " + support["detail"], "emoji_monochrome")
     if emoji_mode == "none":
         if not "".join(ch for ch in all_text if char_script(ch) != "emoji").strip():
             die("the template's text is nothing but emoji and this machine can draw none of them "
@@ -285,7 +294,7 @@ def main() -> int:
         if explicit:
             return font_family_of_file(explicit) or args.font or brand.get("font")
         if script_file:
-            return font_family_of_file(script_file) or font_family_for_script(_script)
+            return _family or font_family_of_file(script_file) or font_family_for_script(_script)
         return args.font or brand.get("font", "DejaVu Sans")
 
     def ass_fonts_dir() -> "Optional[str]":
@@ -550,6 +559,20 @@ def main() -> int:
                      outline=float(max(2, fs // 40)), outline_color=bg, start=ks, end=ke,
                      scale_t=(0, seg * 500, 115))
 
+    # FFmpeg 8.0, 8.0.1 and 8.1 draw the font's missing-glyph box at the end of every line but the
+    # last of a multi-line drawtext (and widen text_w by it). Every template lays out the same
+    # elements for libass, so an auto run whose labels came out multi-line -- given that way or
+    # wrapped to the frame above -- is laid out again on that route; a pinned drawtext run says so.
+    if route == "drawtext" and drawtext_draws_newline_glyph() and any(is_multiline(t) for t in _DRAWTEXT_PENDING.values()):
+        if args.text_render == "auto" and not force_route:
+            info("multi-line text: this ffmpeg's drawtext draws a box at each line break "
+                 "(FFmpeg 8.0-8.0.1 and 8.1.0; fixed in 8.0.2/8.1.1), so it is rendered through libass")
+            _DRAWTEXT_PENDING.clear()
+            return main(force_route="ass")
+        warn("this ffmpeg's drawtext draws a box at each line break of a multi-line label "
+             "(FFmpeg 8.0-8.0.1 and 8.1.0; fixed in 8.0.2/8.1.1): drop --text-render drawtext to render it "
+             "through libass, or upgrade FFmpeg", "drawtext_newline_glyph", text_render="drawtext")
+
     output = args.output or default_output(args.input, "gfx")
     ass_path = None
     emoji_result = None
@@ -612,7 +635,7 @@ def main() -> int:
                 f"(limit {_max}, --emoji-max raises it); ffmpeg's filter graph and the "
                 "per-frame cost both grow linearly -- split the job, or use --emoji none", kind="input")
         if missing:
-            info("warning: no PNG in the assets directory for " + ", ".join(missing))
+            warn("no PNG in the assets directory for " + ", ".join(missing), "emoji_assets_missing", missing=list(missing))
         if emoji_mode:
             emoji_result = {"mode": emoji_mode, "count": len(emoji_clusters(all_text)),
                             "clusters": sorted(seen) or sorted({emoji_codepoint_name(cl) for _i, cl in emoji_clusters(all_text)}),
@@ -689,8 +712,11 @@ def main() -> int:
     dropped_streams = run_keeping_subtitles(cmd, output)
     r = probe(output, role="output")
     info(f"wrote {output} ({fmt_secs(r['duration'])}, {args.template})")
+    if route == "ass":
+        # libass looks the family up itself (fontconfig): the same choice, asked for that renderer
+        font_used = font_opts(brand, args.font, args.font_file, script_file, _family, renderer="libass")[1]
     extra = {"template": args.template, "dropped_non_av_streams": dropped_streams,
-             "text_renderer": route, "script": _script}
+             "text_renderer": route, "script": _script, "font_used": record_font_choice(font_used)}
     if ass_path:
         extra["ass"] = ass_path
     if emoji_result:

@@ -44,25 +44,57 @@ if (has('--help') || has('-h')) {
 // Windows Python installers commonly expose `python`/`py`, not `python3`. The Microsoft Store
 // app-execution alias is a real python3.exe that spawns (no ENOENT) and exits non-zero, so a
 // missing `error` is not proof an interpreter ran. Probe with a version check, then fall through.
-const PYTHON_PROBE = ['-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'];
+// The probe also prints major.minor. 3.0.0 removed Python 3.9 (deprecated in 2.10.9): an older
+// interpreter fails the probe, so it is skipped like a missing one.
+const PYTHON_PROBE = ['-c', "import sys; sys.stdout.write('%d.%d' % sys.version_info[:2]); raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"];
+
+// 3.0.0 removed FFmpeg 5.x (deprecated in 2.14.0). The same line as scripts/_contract.py's
+// FFMPEG_UNSUPPORTED (a test keeps them equal); every tool refuses such a build at run time.
+const FFMPEG_UNSUPPORTED = 'error: FFmpeg {v} is not supported since ffmpeg-skill 3.0.0 (5.x was deprecated in 2.14.0): use FFmpeg 6.1+.';
+
+// The line for `ffmpeg -version`'s first line, or null (6.1 or later, or not a release number).
+function ffmpegUnsupported(versionLine) {
+  const m = /^ffmpeg version n?(\d+)\.(\d+)/.exec(versionLine || '');
+  if (!m) return null;
+  const major = Number(m[1]), minor = Number(m[2]);
+  return major < 6 || (major === 6 && minor < 1) ? FFMPEG_UNSUPPORTED.replace('{v}', `${major}.${minor}`) : null;
+}
 
 function pythonCandidates(platform) {
   return platform === 'win32' ? ['python3', 'python', 'py'] : ['python3'];
 }
 
-function runWithPython(scriptArgs, platform, spawn) {
+// The first candidate that runs and is 3.10+: { cmd, version } (version "3.12", or null when the
+// probe printed nothing), or { missing: true, ... } when none is.
+function findPython(platform, spawn) {
   const candidates = pythonCandidates(platform);
   const run = spawn || spawnSync;
   let last = null;
   for (const cmd of candidates) {
-    const probe = run(cmd, PYTHON_PROBE, { stdio: 'ignore', timeout: 15000 });
+    const probe = run(cmd, PYTHON_PROBE, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 15000 });
     if (probe.error || probe.status !== 0) {
       last = probe;
       continue;
     }
-    return run(cmd, scriptArgs, { stdio: 'inherit' });
+    const out = typeof probe.stdout === 'string' ? probe.stdout.trim() : '';
+    return { cmd, version: /^\d+\.\d+$/.test(out) ? out : null };
   }
   return { missing: true, error: last && last.error, status: last && last.status, candidates };
+}
+
+function runWithPython(scriptArgs, platform, spawn) {
+  const py = findPython(platform, spawn);
+  if (py.missing) return py;
+  return (spawn || spawnSync)(py.cmd, scriptArgs, { stdio: 'inherit' });
+}
+
+// After an install: say so when no Python 3.10+ is on PATH, since every script needs one.
+function warnMissingPython(platform, spawn, warn) {
+  const py = findPython(platform, spawn);
+  if (!py.missing) return null;
+  const line = `warning: no Python 3.10+ interpreter was found (tried: ${py.candidates.join(', ')}); the skill's scripts need one (3.0.0 removed Python 3.9).`;
+  (warn || console.warn)(`\n  ${line}`);
+  return line;
 }
 
 function main() {
@@ -70,7 +102,7 @@ function main() {
 if (args[0] === 'contract' || args[0] === 'doctor') {
   const py = runWithPython([path.join(ROOT, 'scripts', '_contract.py'), ...args], process.platform, spawnSync);
   if (py.missing) {
-    console.error(`error: could not find a Python 3.9+ interpreter (tried: ${py.candidates.join(', ')}). Install Python 3.9+ and ensure it is on PATH.`);
+    console.error(`error: could not find a Python 3.10+ interpreter (tried: ${py.candidates.join(', ')}). Install Python 3.10+ and ensure it is on PATH.`);
     process.exit(127);
   }
   process.exit(py.error ? 127 : (py.status == null ? 1 : py.status));
@@ -119,7 +151,10 @@ function checkFfmpeg() {
     console.warn('    Windows: winget install Gyan.FFmpeg\n');
     return false;
   }
-  console.log(`  found ${r.stdout.split('\n')[0]}`);
+  const first = r.stdout.split('\n')[0];
+  console.log(`  found ${first}`);
+  const line = ffmpegUnsupported(first);
+  if (line) console.warn(`\n  ${line}`);
   return true;
 }
 
@@ -174,6 +209,7 @@ for (const t of targets) {
 
 if (!has('--uninstall')) {
   checkFfmpeg();
+  warnMissingPython(process.platform, spawnSync);
   console.log('\nDone. Ask your agent things like "make this video 60 seconds and add captions".');
 }
 process.exit(failed ? 1 : 0);
@@ -183,4 +219,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { pythonCandidates, runWithPython };
+module.exports = { pythonCandidates, runWithPython, findPython, warnMissingPython, ffmpegUnsupported, FFMPEG_UNSUPPORTED, PYTHON_PROBE };

@@ -31,7 +31,8 @@ import math
 import sys
 from typing import Dict, List, Tuple
 
-from _common import label_chain, matrix_chain, video_args, aac_args, add_common, apply_common, default_output, die, emit, ffmpeg_base, info, time_arg, probe, run, x264_args, X264_PRESETS, fmt_secs, decode_pcm_mono, rms_envelope, STATE
+from _common import guard_sidecar, label_chain, matrix_chain, video_args, aac_args, add_common, apply_common, default_output, die, emit, ffmpeg_base, info, time_arg, probe, run, x264_args, X264_PRESETS, fmt_secs, decode_pcm_mono, rms_envelope, STATE
+from _common.emit import record_fallback, warn
 from sync import measure_offset
 
 ENERGY_WINDOW_S = 0.25  # --switch energy: loudness measured over this window on the reference timeline
@@ -149,6 +150,12 @@ def main() -> int:
     add_common(ap)
     args = ap.parse_args()
     apply_common(args)
+    if not args.offsets_only:  # an offsets-only run writes nothing
+        media_out = args.output or default_output(args.inputs[0], "multicam", "mp4")
+        guard_sidecar(args.edl, *args.inputs, siblings=(args.write_project, media_out))
+        guard_sidecar(args.write_project, *args.inputs, siblings=(media_out,))
+        if args.edl or args.write_project:  # they are written before the cut: refuse its output first
+            guard_sidecar(media_out, *args.inputs)
     if args.analyze_seconds > 900:
         die(f"--analyze-seconds {args.analyze_seconds:g}: the window is decoded into memory; 900 s is the ceiling")
     if args.fps is not None and args.fps <= 0:
@@ -199,7 +206,8 @@ def main() -> int:
         conf.append(score)
         info(f"{p}: offset {off:+.3f}s (confidence {score:.2f})" + (f", drift {(ratio - 1) * 1e6:+.0f} ppm" if args.fix_drift else ""))
         if score < 0.1:
-            info(f"warning: {p} has low correlation confidence ({score:.2f}); check that it shares an audio event with the reference before trusting this offset")
+            warn(f"{p} has low correlation confidence ({score:.2f}); check that it shares an audio event with the reference before "
+                 "trusting this offset", "sync_low_confidence", path=p, confidence=round(score, 3))
 
     report = {"inputs": args.inputs, "offsets_seconds": [round(o, 4) for o in offsets],
               "confidence": [round(c, 3) for c in conf]}
@@ -275,13 +283,19 @@ def main() -> int:
     convert = [matrix_chain(m, metas[0]) for m in metas]
     if any(convert):
         convert = [c or label_chain(m, metas[0]) for c, m in zip(convert, metas)]
+    # what is actually rendered: a range whose camera has not started yet plays camera 0, and the
+    # result says so (`cuts` names the camera on screen, diagnostics.fallbacks the one asked for)
+    rendered: List[Tuple[float, float, int]] = []
     for i, (s, e, c) in enumerate(filled):
         # reference time t maps to source time (t - offset_c) * ratio_c
         src_s = (s - offsets[c]) * ratios[c]
         src_e = (e - offsets[c]) * ratios[c]
         if src_s < 0:
-            info(f"warning: camera {c} has not started at reference {s:.2f}s; using camera 0 for that range")
+            record_fallback(f"camera {c} has not started at reference {s:.2f}s; using camera 0 for that range "
+                            f"({s:.3f}-{e:.3f}s)", "camera_not_started", start=round(s, 3), end=round(e, 3),
+                            requested_camera=c, camera=0, starts_at=round(offsets[c], 3))
             c, src_s, src_e = 0, s, e
+        rendered.append((s, e, c))
         parts.append(f"[{c}:v]trim=start={src_s:.4f}:end={src_e:.4f},setpts=PTS-STARTPTS,{convert[c]}{geo}[v{i}]")
         labels.append(f"[v{i}]")
         project_clips.append({"src": args.inputs[c], "in": round(src_s, 3), "out": round(src_e, 3)})
@@ -321,7 +335,7 @@ def main() -> int:
     r = probe(output, role="output")
     info(f"wrote {output} ({fmt_secs(r['duration'])}, {len(filled)} cuts, audio from input {a})")
     extra = {"switch_mode": "energy", "min_shot": args.min_shot} if energy_mode else {}
-    emit(output, cuts=[[round(s, 3), round(e, 3), c] for s, e, c in filled], **report, **extra)
+    emit(output, cuts=[[round(s, 3), round(e, 3), c] for s, e, c in rendered], **report, **extra)
     return 0
 
 

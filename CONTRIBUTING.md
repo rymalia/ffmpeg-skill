@@ -42,13 +42,16 @@ bug fix — it saves everyone a wasted PR.
 ```bash
 git clone https://github.com/kajisho5/ffmpeg-skill
 cd ffmpeg-skill
-npm test                    # tests/test_all.py + tests/test_contract.py
+npm run test:fast           # tests/test_contract.py only: contract, docs, dry runs (~3-4 min)
+npm test                    # everything: real encodes (test_all.py's modules, run in parallel by tests/run_parallel.py; about 21 min on 4 cores, 35 serially) + contract
+python3 tests/run_parallel.py --part 1/3   # one of CI's three machines' share (test_contract included); about a third of the time
 npm run release-check       # packaging + installer + MCP + doctor + full suite
 python3 scripts/_contract.py doctor   # what this machine can actually run
 ```
 
-Python 3.9+ standard library only — no new runtime dependencies. Every script
-must keep working with nothing beyond `ffmpeg`/`ffprobe` on `PATH`.
+Python 3.10+ standard library only — no new runtime dependencies. 3.10 is the floor CI runs
+(3.0.0 removed 3.9), so code must keep working on it, and on FFmpeg 6.1, the oldest FFmpeg CI
+runs. Every script must keep working with nothing beyond `ffmpeg`/`ffprobe` on `PATH`.
 
 ## Tests
 
@@ -57,6 +60,11 @@ must keep working with nothing beyond `ffmpeg`/`ffprobe` on `PATH`.
   detection.
 - `tests/test_all.py` — real-media conformance across codecs, containers, VFR,
   HDR, multi-track audio, and every tool's actual ffmpeg invocation.
+  It only imports nine group modules (`test_analysis`, `test_editing`, `test_audio`,
+  `test_picture`, `test_delivery`, `test_orchestration`, `test_accel`, `test_asr`,
+  `test_cut_copy`); while working on one tool, run its group alone, e.g.
+  `python3 tests/test_editing.py`, or one case with
+  `python3 tests/test_editing.py EditingTests.test_silence_removal`.
 
 Add a test alongside any behavioral change. A fix without a regression test that
 would have caught the original bug isn't done yet.

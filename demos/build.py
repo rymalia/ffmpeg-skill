@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build the before/after demo gallery: synthetic footage in, previews out.
 
-Everything here is generated from nothing -- ffmpeg's own synthetic sources (testsrc2,
-mandelbrot, life, aevalsrc) make the footage, and every "after" file is produced by running
+Everything here except one demo is generated from nothing -- ffmpeg's own synthetic sources
+(testsrc2, mandelbrot, life, aevalsrc) make the footage; reframe_talk reads demos/footage/ai_talk.mp4,
+and filler_en demos/footage/ai_talk_en.mp4: AI-generated clips (no real person), and every "after" file is produced by running
 this repo's own scripts, so a demo that renders is also a smoke test of the tool behind it.
 
     python3 demos/build.py                 # build every demo
@@ -663,6 +664,32 @@ def demo_reframe_crop(ctx):
     return before, after
 
 
+FOOTAGE = ROOT / "demos" / "footage"   # the one non-synthetic source: AI-generated footage (see demos/footage/README.md)
+
+
+def demo_reframe_talk(ctx):
+    """A talking-head clip made vertical: --crop-x keeps the speaker, who sits left of centre."""
+    before = FOOTAGE / "ai_talk.mp4"
+    after = ctx.path("after.mp4")
+    ctx.script("fit.py", before, "--aspect", "9:16", "--fit", "crop", "--crop-x", "0.27", "--width", "540",
+               "--preset", "veryfast", "-o", after)
+    return before, after
+
+
+def demo_filler_en(ctx):
+    """English speech with two hesitations ("er" at 1.1 s, "um" at 4.4 s). The word timings are
+    the --words file faster-whisper wrote for this clip, primed with the filler list as
+    silence.py --filler --transcribe primes it (demos/footage/ai_talk_en.words.json), so the demo
+    builds without a speech engine."""
+    before = ctx.path("talk.mp4")
+    ffmpeg("-i", FOOTAGE / "ai_talk_en.mp4", "-t", "6", "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(before))
+    after = ctx.path("after.mp4")
+    ctx.script("silence.py", before, "--filler", "--words", FOOTAGE / "ai_talk_en.words.json", "--margin", "0",
+               "--preset", "veryfast", "-o", after)
+    ctx.note("removed er (1.14-1.34 s) and um (4.44-4.78 s); %.2f s in, %.2f s out" % (duration(before), duration(after)))
+    return before, after
+
+
 def demo_reframe_pad(ctx):
     before = FIX / "mandel.mp4"
     after = ctx.path("after.mp4")
@@ -705,9 +732,13 @@ def demo_join_fadeblack(ctx):
 def demo_silence_removal(ctx):
     before = FIX / "motion.mp4"
     after = ctx.path("after.mp4")
+    timemap = ctx.path("timemap.csv")
     ctx.script("silence.py", before, "--threshold", "-35", "--min-silence", "0.4",
-               "--margin", "0.1", "--preset", "veryfast", "-o", after)
-    ctx.note("%.2f s in, %.2f s out" % (duration(before), duration(after)))
+               "--margin", "0.1", "--timemap", timemap, "--preset", "veryfast", "-o", after)
+    rows = timemap.read_text(encoding="utf-8").splitlines()[1:] if timemap.exists() else []
+    ctx.note("%.2f s in, %.2f s out; the time map lists %d kept and %d removed range(s)"
+             % (duration(before), duration(after), sum(r.startswith("kept,") for r in rows),
+                sum(r.startswith("removed,") for r in rows)))
     return before, after
 
 
@@ -825,6 +856,17 @@ def demo_cut_accurate(ctx):
         ctx.note("copy: keyframe_snapped=%s, %.2f s of extra material; accurate: 2.05 s exactly"
                  % (found.get("keyframe_snapped"), found.get("duration_delta_seconds", 0.0)))
     return before, after
+
+
+def demo_cut_remove(ctx):
+    """--remove names what to drop and keeps the rest: 2-4 s of the clip are gone."""
+    src = FIX / "mandel.mp4"
+    after = ctx.path("after.mp4")
+    out = ctx.script("cut.py", src, "--remove", "2-4", "--accurate", "--preset", "veryfast", "--json", "-o", after,
+                     capture=True)
+    if out:
+        ctx.note("kept %.2f s; 2-4 s of the source removed" % (json.loads(out).get("output_duration") or 0.0))
+    return src, after
 
 
 def demo_cut_edit_list(ctx):
@@ -1012,6 +1054,17 @@ def demo_greenscreen(ctx):
     ctx.script("overlay.py", plate, "--video", before, "--chromakey", "0x00b140",
                "--chromakey-similarity", "0.18", "--chromakey-blend", "0.05",
                "--position", "center", "--scale", "960", "--preset", "veryfast", "-o", after)
+    return before, after
+
+
+def demo_overlay_place(ctx):
+    """overlay.py --place: two ranges of one layer, each shown at its own time on the main
+    timeline; the main picture is untouched between them."""
+    before = FIX / "motion.mp4"
+    after = ctx.path("after.mp4")
+    ctx.script("overlay.py", before, "--video", FIX / "mandel.mp4", "--position", "bottom-right",
+               "--scale", "480", "--place", "0-1.5@0.5", "--place", "4-5.5@3.5",
+               "--preset", "veryfast", "-o", after)
     return before, after
 
 
@@ -1360,6 +1413,32 @@ def demo_silence_speech_aware(ctx):
     return naive, after
 
 
+def demo_filler_korean(ctx):
+    """2.19 built-in Korean list. Five timed words over a tone bed: the two 음/어 hesitations are
+    cut, 음악은 ("music"), which starts with the same syllable, is kept -- fillers match whole
+    words, never prefixes. The timings are the --words file a speech engine would write."""
+    before = ctx.path("speech.mp4")
+    words = [("오늘은", 0.3, 1.1), ("음", 1.4, 2.0), ("음악은", 2.3, 3.3), ("어", 3.6, 4.2), ("좋아요", 4.5, 5.5)]
+    filler = {"음", "어"}
+    voiced = "+".join("between(t\\,%s\\,%s)" % (a, b) for w, a, b in words if w not in filler)
+    hum = "+".join("between(t\\,%s\\,%s)" % (a, b) for w, a, b in words if w in filler)
+    expr = "(%s)*(%s)+0.35*sin(2*PI*140*t)*(%s)" % (SPEECH, voiced, hum)
+    ffmpeg("-f", "lavfi", "-i", "aevalsrc='%s':s=48000" % expr, "-t", "6", str(before))
+    words_json = ctx.path("words.json")
+    words_json.write_text(json.dumps({"language": "ko", "segments": [
+        {"words": [{"word": w, "start": a, "end": b} for w, a, b in words]}]}, ensure_ascii=False),
+        encoding="utf-8")
+    listed = ctx.script("silence.py", before, "--filler", "--words", words_json, "--filler-list",
+                        "--json", capture=True)
+    after = ctx.path("after.mp4")
+    ctx.script("silence.py", before, "--filler", "--words", words_json, "--margin", "0",
+               "--preset", "veryfast", "-o", after)
+    removed = (json.loads(listed).get("filler", {}).get("removed_words") if listed else None) or "?"
+    ctx.note("--filler-lang auto read 'ko' from the transcript; removed %s, kept 음악은; "
+             "%.2f s in, %.2f s out" % (", ".join(removed) if removed != "?" else "?", duration(before), duration(after)))
+    return before, after
+
+
 def demo_motion_centre(ctx):
     """cropdetect.py --motion-centre reports where the motion sits per second; it never picks a
     reframe. Left is a naive centre crop, which clips the moving subject sitting off to one
@@ -1468,6 +1547,12 @@ _ROWS = [
     ("reframe_crop", PICTURE, "16:9 to 9:16 by cropping",
      "The vertical frame is cut out of the centre of the wide one -- full height, sides lost.",
      demo_reframe_crop, "video", None),
+    ("reframe_talk", PICTURE, "A talking head made vertical (AI-generated footage)",
+     "The 9:16 frame is placed on the speaker with --crop-x 0.27 instead of the centre, where it would cut her face in half. The source is AI-generated footage, not a real person.",
+     demo_reframe_talk, "video", None),
+    ("filler_en", AUDIO, "Filler words cut from real speech (AI-generated footage)",
+     "\"Hey, er, hello there. Well, um, good morning.\" Right is silence.py --filler: the er and the um are gone and the sentence plays straight through. The source is AI-generated footage, not a real person.",
+     demo_filler_en, "video", None, ("BEFORE", "--FILLER")),
     ("reframe_pad", PICTURE, "16:9 to 9:16 by padding",
      "Nothing is lost: the wide frame is kept whole and the gap above and below is filled with a blurred copy.",
      demo_reframe_pad, "video", None),
@@ -1485,7 +1570,8 @@ _ROWS = [
      demo_join_fadeblack, "video", None),
 
     ("silence_removal", AUDIO, "Silence removal",
-     "The 'after' side runs out of material and freezes: that held frame is the part of the timeline that was cut.",
+     "The 'after' side runs out of material and freezes: that held frame is the part of the timeline that was cut. "
+     "The --timemap CSV beside it says where each kept range sits in the source and in the cut, to re-time subtitles.",
      demo_silence_removal, "video", None),
     ("loudness", AUDIO, "Loudness normalisation to -14 LUFS",
      "Two showwavespic plots: the quiet input on the left, the same programme brought up to broadcast level on the right without clipping.",
@@ -1522,6 +1608,9 @@ _ROWS = [
     ("cut_accurate", PICTURE, "Lossless cut vs. accurate cut",
      "Both sides asked for the same 2.05 s start. The stream copy could only snap to the nearest keyframe, so its first frame is from earlier in the clip; --accurate re-encodes and starts on the frame that was asked for.",
      demo_cut_accurate, "video", None, ("LOSSLESS", "--ACCURATE")),
+    ("cut_remove", PICTURE, "Cut out a range, keep the rest",
+     "cut.py --remove 2-4 drops two seconds from the middle and joins what is left: the 'after' side jumps from 2 s to 4 s of the source and finishes two seconds early.",
+     demo_cut_remove, "video", None, ("SOURCE", "--REMOVE 2-4")),
     ("cut_edit_list", PICTURE, "Lossless cut that starts where asked",
      "Both sides are stream copies of the same 2.05 s request. The default shifts the copy's timestamps to zero, so the keyframe's pre-roll plays first (start_snapped: true); --edit-list keeps the MP4 edit list that hides it, so the picture starts at 2.05 s (start_snapped: false, stored_preroll_seconds says how much is hidden). A player that ignores edit lists shows the pre-roll.",
      demo_cut_edit_list, "video", None, ("DEFAULT COPY", "--EDIT-LIST")),
@@ -1576,6 +1665,9 @@ _ROWS = [
     ("greenscreen", PICTURE, "Green screen onto a generated background",
      "background.py draws the gradient plate from nothing (there is no input file), then overlay.py keys the chroma green out of the subject and composites it on top.",
      demo_greenscreen, "video", None),
+    ("overlay_place", PICTURE, "Pieces of one layer at their own times",
+     "overlay.py --place lays two ranges of the fractal clip on the test pattern: its first 1.5 s at 0.5 s, its 4-5.5 s at 3.5 s. Between them the layer is hidden and the main picture is untouched -- one pass, no full-length mostly-transparent layer to render first.",
+     demo_overlay_place, "video", None),
     ("color_lut", PICTURE, "Apply a .cube LUT",
      "A 3D LUT applied at full strength: highlights warm, shadows cool. The same flag takes a camera vendor's Log-to-709 transform or a creative look -- the file decides, the tool does not.",
      demo_color_lut, "video", None),
@@ -1622,6 +1714,9 @@ _ROWS = [
     ("silence_speech_aware", AUDIO, "Speech-aware silence removal keeps the breaths",
      "A 0.25 s breath sits inside a sentence and a 1 s pause sits between sentences. Left uses a --min-silence low enough to catch the breath too, so plain detection cuts both; right is --speech-aware at the ordinary --min-silence -- its finer 0.12 s floor still measures the breath, but the breath is shorter than --min-silence so it is kept, and only the real sentence-boundary pause is cut.",
      demo_silence_speech_aware, "wave", None, ("--MIN-SILENCE 0.2 (cuts the breath)", "--SPEECH-AWARE (breath kept)")),
+    ("filler_korean", AUDIO, "Korean filler words cut by the built-in list",
+     "Five timed words, two of them the hesitations 음 and 어 (the low hum). Right is silence.py --filler with the transcript's language read as Korean: both hesitations are gone, and 음악은 (music), which starts with the same syllable, stays -- a filler matches a whole word, never a prefix.",
+     demo_filler_korean, "wave", None, ("BEFORE", "--FILLER (KO)")),
     ("motion_centre_crop", PICTURE, "Crop centred on the measured motion",
      "cropdetect.py --motion-centre reports where the motion sits per second; it never picks a reframe itself. Left is a naive centre crop that clips the moving subject sitting off to one side; right is crop.py aimed at the measured centroid instead.",
      demo_motion_centre, "video", None, ("CENTRE CROP", "MOTION-CENTRED CROP")),
@@ -1648,6 +1743,12 @@ INSPECTION = [
     ("batch.py", "python3 scripts/batch.py ~/Footage --recipe batch.json --dry-run",
      "applies one recipe to a folder with a content-hash cache, printing what it would run, "
      "what it skipped as unchanged, and where each output lands."),
+    ("check.py --content", "python3 scripts/check.py final.mp4 --platform youtube --content",
+     "adds content rows to the platform check: black frames, frozen frames, the share of "
+     "silence, and short dropouts (digital silence for 20 ms to 1 s with sound on both sides, "
+     "the mark of lost audio at a join), single-frame flashes (one frame unlike both of its "
+     "neighbours) and a first frame of one flat colour. The dropouts and flashes rows list the "
+     "first five times; a row that does not pass names a fix."),
     ("report.py", "python3 scripts/report.py --before raw.mov --after final.mp4 -o report.html",
      "a single self-contained HTML page: before/after contact sheets, loudness, the platform "
      "check table and the exact commands. It is a file to open, not a picture to embed here."),
@@ -1657,9 +1758,10 @@ INSPECTION = [
 # --------------------------------------------------------------------------- docs
 DOC_HEADER = """# Demo gallery
 
-Every clip on this page was generated from nothing: ffmpeg's own synthetic sources make the
-footage, and each "after" is produced by running one of this repo's scripts on it. Rebuild the
-whole page's material with:
+Every clip on this page but two was generated from nothing: ffmpeg's own synthetic sources make
+the footage. The two exceptions, `reframe_talk` and `filler_en`, use AI-generated footage of
+people who do not exist (`demos/footage/`). Each "after" is produced by running one of this
+repo's scripts on its source. Rebuild the whole page's material with:
 
 ```bash
 python3 demos/build.py            # or: npm run demo

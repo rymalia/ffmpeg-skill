@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILL_ID = "ffmpeg-skill"
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "2.0"
 # `doctor`'s own introspection calls (-filters/-encoders/-bsfs/-version) are meant to be fast,
 # bounded, non-media operations; a hang here would silently freeze the one tool meant to report
 # whether the machine is broken. Media-processing scripts (cut, fit, ...) are NOT bounded this
@@ -79,7 +79,7 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                   video_required=False, audio_only=True, visual=False, verify=[], produces_artifact=False, idempotency="bit_exact", deterministic=True),
     "cut": dict(role="execution", inputs=["video or audio asset"], outputs=["cut video/audio artifact (same container family, or audio extracted when -o has an audio extension)"],
                 required=FF, optional=[{"capability": X264, "when": "re-encode: --accurate, VFR source, or a keyframe farther than --tolerance"},
-                                       dict(HDR_X265, when=HDR_X265["when"] + "; with --keep-hevc on an HEVC source"), {"capability": AAC, "when": "re-encode of a video container"}] + AUDIO_OUT,
+                                       dict(HDR_X265, when=HDR_X265["when"] + "; on an SDR HEVC source (the default since 3.0.0; --no-keep-hevc uses x264)"), {"capability": AAC, "when": "re-encode of a video container"}] + AUDIO_OUT,
                 video_required=False, audio_only=True, visual=False, verify=["probe"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "fit": dict(role="execution", inputs=["video asset"], outputs=["video artifact at the requested duration / aspect / fps"],
                 required=FF + [X264, AAC], optional=[HDR_X265, {"capability": "filter:minterpolate", "when": "--smooth interpolate"},
@@ -185,7 +185,10 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                  video_required=False, audio_only=True, visual=True, verify=["probe", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "color": dict(role="execution", inputs=["video asset", ".cube LUT (--lut)"], outputs=["video artifact with converted colour"],
                   required=FF, optional=[{"capability": X264, "when": "--to-sdr / --lut / --correct"}, {"capability": "filter:zscale", "when": "--to-sdr"}, {"capability": "filter:tonemap", "when": "--to-sdr"},
-                                         {"capability": "filter:lut3d", "when": "--lut"}, {"capability": "bsf:filter_units", "when": "--strip-dovi"}, {"capability": X265, "when": "--lut on an HDR source"}, {"capability": AAC, "when": "re-encode"},
+                                         {"capability": "filter:lut3d", "when": "--lut"}, {"capability": "bsf:filter_units", "when": "--strip-dovi"}, {"capability": "bsf:h264_metadata", "when": "--retag on H.264 (without it the video is re-encoded)"},
+                                         {"capability": "bsf:hevc_metadata", "when": "--retag on HEVC (without it the video is re-encoded)"},
+                                         {"capability": "bsf:mpeg2_metadata", "when": "--retag on MPEG-2 (without it the video is re-encoded)"}, {"capability": "bsf:av1_metadata", "when": "--retag on AV1 (without it the video is re-encoded)"},
+                                         {"capability": "bsf:vp9_metadata", "when": "--retag on VP9 (without it the video is re-encoded)"}, {"capability": X265, "when": "--lut on an HDR source"}, {"capability": AAC, "when": "re-encode"},
                                          {"capability": "filter:exposure", "when": "--correct"}, {"capability": "filter:eq", "when": "--correct"},
                                          {"capability": "filter:colorbalance", "when": "--correct"}, {"capability": "filter:colortemperature", "when": "--correct"},
                                          {"capability": "filter:colorlevels", "when": "--correct with any --levels-*"}, {"capability": "filter:curves", "when": "--correct --curves"}],
@@ -215,7 +218,7 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                  video_required=True, audio_only=False, visual=False, verify=[], produces_artifact=True, idempotency="bit_exact", deterministic=True),
     "render": dict(role="execution", inputs=["project.json (clips, transitions, captions, overlays, audio, loudness, export, check)", "media asset plus --template NAME (a shipped delivery template)"], outputs=["final video artifact", "one artifact per destination plus a pack table (--template all)", "work directory of stage outputs (--keep / --work)", "editor timeline (.fcpxml / .edl / .otio) instead of a render (--export-timeline)"],
                    required=FF, optional=[{"capability": "delegated", "when": "each stage (and each destination of --template) runs cut / join / fit / caption / graphics / overlay / audio / loudness / export / check with their capabilities"}],
-                   video_required=True, audio_only=False, visual=True, verify=["probe", "check", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
+                   video_required=False, audio_only=True, visual=True, verify=["probe", "check", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "batch": dict(role="execution", inputs=["folder of media", "batch.json recipe (steps or a render project)"], outputs=["one artifact per input file in the recipe's output_dir", "content-hash cache"],
                   required=FF, optional=[{"capability": "delegated", "when": "each recipe step runs the named script with its capabilities"}],
                   video_required=False, audio_only=True, visual=False, verify=["probe"], produces_artifact=True, idempotency="cached", deterministic=True),
@@ -240,6 +243,7 @@ DRY_RUN_ANALYSIS = {
     "loudness": "the loudnorm measurement pass runs so input_i and the planned pass-2 command are real; the normalised output is not written",
     "check": "read-only tool; the loudness measurement (or, when it is skipped, the audio row's volumedetect) and the --content decode run under --dry-run too, so every row is present",
     "stabilize": "vidstabdetect (pass 1, into a temp file) runs; the stabilised output (pass 2) is not written",
+    "overlay": "only for a multi-line --text on FFmpeg 8.0, 8.0.1 or 8.1.0: one drawtext measures each line on a generated one-frame picture (the input is not read), so the planned per-line positions are the ones a run uses; otherwise no ffmpeg runs and the composited output is never written",
 }
 DRY_RUN_NOTES = {
     "probe": "read-only tool; --dry-run changes nothing (ffprobe still runs)",
@@ -286,8 +290,8 @@ REENCODE_META: Dict[str, Dict[str, str]] = {
     "audio":     dict(video="never", audio="always", note="video stream is always -c:v copy when present; this tool's job is the audio"),
     "loudness":  dict(video="never", audio="always"),
     "silence":   dict(video="always", audio="always", note="removing gaps requires cutting on non-keyframe boundaries"),
-    "join":      dict(video="always", audio="always"),
-    "color":     dict(video="conditional", audio="conditional", note="--strip-dovi and --retag (when the stream copy succeeds) are -c copy of both streams; --retag falls back to re-encoding only if the copy attempt fails; --to-sdr / --lut / --correct always re-encode both"),
+    "join":      dict(video="conditional", audio="conditional", note="--copy --transition none is -c copy of the first video and audio stream (clips with matching parameters only); every other join re-encodes both"),
+    "color":     dict(video="conditional", audio="conditional", note="--strip-dovi and --retag (when the stream copy succeeds) are -c copy of both streams; --retag falls back to re-encoding only if the copy attempt fails or ffprobe still reads the old tags on the copy (a codec with no metadata bitstream filter here); --to-sdr / --lut / --correct always re-encode both"),
     "proxy":     dict(video="always", audio="conditional", note="video is always re-encoded at proxy-grade quality; audio is re-encoded when present, dropped entirely with --no-audio or when the source has none"),
     "export":    dict(video="conditional", audio="conditional", note="--preset copy is -c:v copy -c:a copy (no re-encode); every other preset re-encodes both"),
     "check":     dict(video="never", audio="never", note="read-only, no artifact"),
@@ -393,6 +397,150 @@ def input_schema(parser: argparse.ArgumentParser) -> Dict[str, Any]:
     return schema
 
 
+# The collector's records (docs/design-decisions.md, "Nothing happens silently"): on success and
+# failure documents alike, present only when one list is not empty.
+DIAGNOSTICS_SCHEMA = {
+    "type": "object",
+    "description": "what the run decided on its own, recorded as it happened (each also a stderr line): warnings (something went "
+                   "other than asked), fallbacks (another route was taken and the run went on), skipped (a step that would "
+                   "normally run did not). Each entry is {code, message, ...facts}; an entry a render.py stage reported carries "
+                   "`stage`. Absent when all three are empty",
+    "properties": {k: {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}}}}
+                   for k in ("warnings", "fallbacks", "skipped")},
+}
+
+# error.reason: a stable code for why a refusal happened, beside `kind` (which says what class of
+# failure it is). Every refuse() call in scripts/ names one of these (a test reads the sources).
+ERROR_REASONS = {
+    "disk_full": "kind ffmpeg: ffmpeg reported \"No space left on device\" while writing; the hint says to free space or write elsewhere; details: {}",
+    "filter_missing": "kind ffmpeg: this ffmpeg build lacks a filter the command used (\"No such filter\"); details: {name}; the hint points at doctor",
+    "input_incomplete": "kind ffmpeg: the input has no index (\"moov atom not found\"): a recording cut off or a copy not finished; --repair cannot rebuild it; details: {}",
+    "input_unreadable": "kind ffmpeg: ffmpeg could not read the input as media (\"Invalid data found when processing input\"); details: {}",
+    "ffmpeg_unsupported": "kind missing_tool: the ffmpeg/ffprobe on PATH reports a version older than 6.1, which 3.0.0 no longer supports (5.x was deprecated in 2.14.0); details: {version, required}",
+    "output_exists": "an output already exists and --overwrite was not given; details.outputs: [{path, resolved, size, mtime_ns}]",
+    "output_is_input": "the output resolves to the same file as an input; details: {output, input, resolved}",
+    "output_is_directory": "the output path is a directory; details: {output}",
+    "media_path_is_playlist": "an input is a playlist (HLS .m3u8/.m3u or an ffconcat list, by name or by its first bytes) that ffmpeg would follow to the files it names; the skill takes media files only; details: {path}",
+    "media_path_not_a_file": "an input exists but is not a regular file (a FIFO or a device), which ffmpeg would block on or read as a stream; details: {path}",
+    "join_copy_mismatch": "join.py --copy: a clip's streams do not match the first clip's, it hides pre-roll frames with an edit list, or its picture and sound end more than 50 ms apart; details: {clips: [{index?, path, differs}]}",
+    "output_path_taken": "two files one run writes (a side file and the output, or two side files) resolve to the same path, so the second would replace the first; details: {output, other}",
+    "output_looks_like_option": "the output starts with '-' (other than '-' for stdout), which ffmpeg would read as an option; ./name writes a file of that name; details: {output}",
+    "media_path_is_url": "an input or output has a protocol prefix (tcp:, http://, file:, ...) that ffmpeg would open as a URL; the skill reads and writes local files only; details: {path, scheme}",
+    "output_dir_missing": "the output's directory does not exist; details: {output, directory}",
+    "output_dir_not_writable": "the output's directory is not writable; details: {output, directory}",
+    "timemap_path_taken": "silence.py --timemap names the same file as -o, --edl or --plan; details: {timemap, flag, path}",
+    "output_locked": "another run holds the output's lock; details: {lock, output, pid, pid_alive, deadline, why}",
+    "plan_inputs_changed": "render.py PLAN: a fingerprinted input is missing or changed; details: {plan, plan_sha256, checked_at, "
+                           "inputs: [{path, status: unchanged|changed|missing, expected: {size, sha256_head_tail}, actual: {size, "
+                           "sha256_head_tail} | \"missing\"}], unbound_inputs, audit_log}",
+    "plan_version_unsupported": "render.py PLAN: plan_version is not one this version executes; details: {plan, plan_sha256, checked_at, plan_version, supported, audit_log}",
+    "plan_unknown_tool": "render.py PLAN: the plan names no tool render.py can run; details: {plan, plan_sha256, checked_at, tool, audit_log}",
+    "plan_cwd_missing": "render.py PLAN: the directory the plan was made in is gone; details: {plan, plan_sha256, checked_at, cwd, audit_log}",
+    "plan_argv_invalid": "render.py PLAN: argv is not a list; details: {plan, plan_sha256, checked_at, argv_type, audit_log}",
+    "encoder_missing": "--codec av1/prores: the build's encoder list was read and has no encoder for the codec (kind missing_tool; details: {codec, encoders}); or ffmpeg itself reported \"Unknown encoder\" for the encoder the command named (kind ffmpeg; details: {name}; the hint points at doctor)",
+    "asr_engine_missing": "kind missing_tool: --transcribe (caption.py, silence.py --filler) found no local speech-to-text engine; the message lists the install lines; details: {}",
+    "encoder_list_unreadable": "--codec av1/prores: the build's encoder list could not be read, so whether it has the encoder is unknown (kind ffmpeg); details: {codec, encoders, error}",
+}
+
+# The codes of the collector's records (docs/design-decisions.md, "Nothing happens silently"):
+# code -> (bucket, what it records). Every warn()/record_fallback()/record_skip() literal under
+# scripts/ is listed here under its bucket (a test reads the sources), so a caller can switch on
+# a code the contract publishes.
+DIAGNOSTIC_CODES = {
+    # infrastructure (part 1)
+    "stale_lock_taken_over": ("fallbacks", "a dead or past-deadline writer's output lock was taken over; {lock, output, pid, pid_alive, deadline, why}"),
+    "output_unlocked": ("warnings", "no output lock could be created and the run went on without one; {lock, output, error}"),
+    "lock_deadline_unset": ("warnings", "the lock's deadline (its mtime) could not be set; {lock, error}"),
+    "audit_log_unwritable": ("warnings", "an audit record could not be appended; never fails the run; {path, event, error}"),
+    "plan_unbound_inputs": ("warnings", "render.py PLAN: inputs that did not exist when the plan was made, so were not checked; {paths}"),
+    # the runner
+    "odd_dimensions_scaled_even": ("fallbacks", "an encode that failed on odd dimensions was run again scaled to even ones (the frame loses a row or column); {output, scale}"),
+    "measurement_input_pending": ("skipped", "--dry-run: a measurement skipped because its input is an earlier stage's output that does not exist yet; {path}"),
+    "non_av_streams_dropped": ("fallbacks", "the subtitle/data streams could not be copied, so the encode ran again without them (dropped_non_av_streams: true); {output, returncode, error: the first attempt's last stderr lines}; export.py adds dropped: the stream types this retry leaves out (data alone first, then subtitle too)"),
+    "ffmpeg_list_unreadable": ("warnings", "`ffmpeg -encoders` / `-bsfs` could not be read; what needs the list says so instead of 'the build lacks it'; {list, tool, error}"),
+    "timeout_env_invalid": ("warnings", "FFMPEG_SKILL_TIMEOUT was not a number (the default was used) or was negative (read as 0, no limit); {value, timeout}"),
+    # encoder decisions
+    "av1_encoder_libaom": ("fallbacks", "--codec av1 on a build without libsvtav1: libaom-av1 encoded instead; {wanted, used}"),
+    "crf_clamped": ("warnings", "the CRF handed to the encoder was above its maximum and was capped (the HEVC HDR line adds 2); {encoder, requested, asked, used}"),
+    # fonts and text
+    "font_substituted": ("fallbacks", "the asked font family is not installed: fontconfig or the Windows Fonts folder gave another (font_used names it); {asked, file, family, via}"),
+    "font_lacks_script": ("warnings", "an explicit --font does not cover the text's script and is kept as asked; {font, script}"),
+    "font_coverage_unverified": ("warnings", "whether a font covers the text's script could not be checked (no fontconfig / fc-scan); {script, fonts_dir?}"),
+    "font_path_copied": ("fallbacks", "a --font-file under a non-ASCII path was copied to an ASCII one, because drawtext cannot open it on Windows; {font, file}"),
+    "font_path_not_ascii": ("warnings", "a --font-file under a non-ASCII path could not be given an ASCII form on Windows; drawtext may not open it; {font}"),
+    "fonts_dir_lacks_script": ("fallbacks", "no face in --fonts-dir covers the text's script, so one was picked by script; {fonts_dir, script}"),
+    "font_variant_missing": ("fallbacks", "--lang named Traditional Chinese but no Traditional face is installed, so a Simplified one draws it (some glyph forms differ); {lang, file}"),
+    "emoji_monochrome": ("warnings", "emoji drawn by the text font (monochrome at best): no colour path here"),
+    "emoji_stripped": ("warnings", "overlay.py --emoji none: emoji removed from the drawn text; {mode}"),
+    "emoji_assets_missing": ("warnings", "--emoji-assets has no PNG for these clusters; the text font draws them; {missing}"),
+    "drawtext_newline_glyph": ("warnings", "graphics.py --text-render drawtext on FFmpeg 8.0-8.0.1/8.1.0: a box is drawn at each line break of a multi-line label; {text_render}"),
+    "timeline_parse_failed": ("warnings", "render.py --export-timeline: the written file does not read back as its format (the parse step is ok: false); {path, format, error}"),
+    # captions
+    "ass_lines_unshifted": ("warnings", "caption.py --ass --offset: Dialogue lines whose timestamps could not be read were copied unshifted; {path, count, offset}"),
+    "ass_lines_malformed": ("warnings", "caption.py --ass: Dialogue lines that could not be read (fields or start/end) are not counted as cues; {path, count}"),
+    "cues_outside_video": ("warnings", "caption.py: cues wholly outside the video are not drawn; {count, duration}"),
+    "asr_language_assumed": ("warnings", "--transcribe: the language was assumed (English) and the transcript is wrong if it is not"),
+    # analysis
+    "drift_correction_skipped": ("skipped", "sync.py --fix-drift not applied for a source (drift_skipped_reason); {path, reason: too_short | low_confidence, ...}"),
+    "sync_low_confidence": ("warnings", "sync.py / multicam.py: a source's offset has a correlation confidence below 0.1; {path, confidence}"),
+    "cropdetect_windows_failed": ("warnings", "cropdetect.py: sampled windows ffmpeg could not decode (windows_failed); {failed, windows, starts}"),
+    "filler_words_untimed": ("warnings", "silence.py --filler: listed words in the transcript with no usable timing were not removed (filler.matched_untimed); {count}"),
+    "cut_near_sound": ("warnings", "silence.py: a cut point's level is within CUT_SOUND_MARGIN_DB of --threshold, so it may land in a breath or a word's weak tail (cut_warnings lists them)"),
+    "cut_levels_unmeasured": ("warnings", "silence.py: the source could not be decoded to measure the level at each cut; cut_points and cut_warnings are null (unmeasured, not silent)"),
+    "filler_removal_caution": ("warnings", "silence.py --filler: a removed word that is often an ordinary word, or a discourse marker added with --filler-extra (also in filler.warnings)"),
+    # media and defaults
+    "silent_track_mixed": ("warnings", "audio.py --on-silent warn: a silent track was mixed anyway; {tracks}"),
+    "silent_inputs": ("warnings", "join.py --on-silent warn: silent inputs joined anyway (silent); {count}"),
+    "silent_input": ("warnings", "waveform.py: the input audio is silent and the visualisation is a flat line; {path, peak_db}"),
+    "short_inputs": ("warnings", "join.py: inputs shorter than two frames joined anyway (short_segments); {count}"),
+    "duplicate_inputs": ("warnings", "join.py: an input listed more than once is joined each time (duplicates); {count}"),
+    "sequence_gap": ("warnings", "sequence.py: a frame is missing from the numbering and the frames after it are not in the video; {missing, frames_left_out, first_left_out}"),
+    "memory_heavy": ("warnings", "reverse.py / loop.py --boomerang hold every decoded frame in memory and this input is large"),
+    "dovi_not_detected": ("warnings", "color.py --strip-dovi on a stream with no Dolby Vision metadata: unregistered SEI removed anyway"),
+    "frame_from_export_preset": ("warnings", "render.py: frame.width/height taken from the export preset for a frame given only an aspect; {preset, width, height}"),
+    "normalize_on_by_default": ("warnings", "render.py: a platform export preset with no loudness stage got export.py --normalize by default; {preset}"),
+    # degraded or partial results (part 2)
+    "colour_not_converted": ("warnings", "export.py: an HDR or wide-gamut source written by a preset that tags SDR BT.709 without converting it; {preset, hdr_format}"),
+    "output_audio_silent": ("warnings", "export.py: the written audio is silent (-inf LUFS), so no gain meets the platform's loudness; {platform}"),
+    "flash_pass_failed": ("warnings", "check.py --content: the flash pass failed, so the flashes row is not measured (WARN, could not measure); the other rows stand"),
+    "repair_incomplete": ("warnings", "export.py --repair: decode errors remain after the remux (a damaged frame needs a re-encode); {timestamp_warnings, decode_errors}"),
+    "size_over_limit": ("warnings", "export.py --max-mb: the written file is over the size asked for (the encoder overshot its bitrate); {size, limit}"),
+    "loudness_outside_spec": ("warnings", "export.py: the written file's loudness is outside the platform's spec (normalized: after --normalize too); {platform, lufs, tp, normalized}"),
+    "camera_not_started": ("fallbacks", "multicam.py: a range asked for a camera that had not started; camera 0 played it ({start, end, requested_camera, camera, starts_at}); `cuts` names the camera rendered"),
+    "loudness_not_measured": ("warnings", "export.py: the written file's loudness could not be read, so the platform's loudness was not verified (loudness.ok null, a failing loudness verification step)"),
+    "loudness_no_audio": ("skipped", "export.py: a platform preset's loudness check, on a source with no audio"),
+    "report_section_missing": ("warnings", "report.py: a loudness, compliance or contact-sheet section could not be built (also a failing verification step naming the section)"),
+    "report_section_dry_run": ("skipped", "report.py --dry-run draws no contact sheet"),
+    "check_dry_run": ("skipped", "render.py --dry-run does not run a check stage or a plan's check step"),
+    "check_no_output": ("skipped", "render.py PLAN: the tool reported no output for the plan's check step"),
+    "check_nothing_to_check": ("skipped", "render.py: a \"check\" stage with neither \"platform\" nor \"content\": true"),
+    "check_output_unparsed": ("warnings", "render.py: check.py printed no JSON document; `check` is a failure document (error.reason check_output_unparsed)"),
+    "cache_entry_damaged": ("warnings", "render.py --cache: a sidecar that does not parse or an artifact of the wrong size (also an audit line in the cache directory); the stage runs again"),
+    "cache_store_failed": ("warnings", "render.py --cache: a stage's artifact could not be stored; the run is unaffected"),
+    "cache_input_unreadable": ("warnings", "render.py --cache: an input could not be fingerprinted and is keyed as \"missing\""),
+    "cache_ffmpeg_banner_unreadable": ("fallbacks", "render.py --cache: the ffprobe banner could not be read; keyed on major.minor, so builds of one release share entries"),
+    "cache_result_unrecorded": ("skipped", "render.py --cache: a hit from an entry that recorded no stage result, so what that stage verified is unknown"),
+    "recipe_project_unreadable": ("warnings", "batch.py: recipe.project could not be read; the cache key covers the recipe only"),
+    "batch_cache_reset": ("warnings", "batch.py: .ffskill_cache.json did not parse and was started empty (also an audit line)"),
+    "batch_cache_output_changed": ("warnings", "batch.py: a cached item's output was replaced or edited since the batch wrote it; the item runs again"),
+    "batch_cache_entry_unverifiable": ("warnings", "batch.py: a cache entry from before output identities; the item runs again"),
+}
+
+
+# `font_used` on the tools that draw text: which font the text was drawn with, so a run that
+# drew with a substitute says so (with a font_substituted fallback)
+FONT_USED_SCHEMA = {
+    "type": "object",
+    "description": "the font the text was drawn with: {asked, file, family, how, substituted, via?, fonts_dir?}. how: font_file (the "
+                   "caller's file), script (picked to cover the text's script), resolved (the asked family resolved to a file by "
+                   "fc-match or the Windows Fonts folder; for libass, the file fontconfig picks for the family), by_name (no file "
+                   "resolved: ffmpeg/libass look the family up themselves, file null), fonts_dir (caption.py: the family looked up "
+                   "in --fonts-dir first), ass_styles (caption.py --ass: the file's own styles name the fonts). substituted: the "
+                   "file is not the asked family (also a diagnostics.fallbacks entry, font_substituted). overlay.py: with --text; "
+                   "grid.py: with --label auto",
+}
+
+
 def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str, Any]:
     """What the tool prints on stdout with --json (keys observed in the implementation). `hw`: the
     tool takes --hw, so its `notes` can also carry a VideoToolbox encode's quality line."""
@@ -403,19 +551,23 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
     base = {"status": {"enum": ["completed"]}, "output": {"type": ["string", "null"], "description": "path written, or null"},
             "dry_run": {"type": "boolean"}, "commands": {"type": "array", "items": {"type": "string"}, "description": "every ffmpeg command line planned or run"},
             "probe": {"type": "object", "description": "probe of the output when a file was written"},
+            "output_identity": {"type": "object", "description": "2.24: {size, mtime_ns} of the file this run wrote, absent under --dry-run; pass it to check.py --expect-identity SIZE:MTIME_NS so the check grades this file and not whatever later sits at the path"},
             "encoder": {"type": "string", "description": "the video encoder the last ffmpeg command used (after any GPU->CPU fallback; under --dry-run the planned one; render.py and waveform.py: their stages' commands included), `copy` for a stream copy; absent when no command encoded video"},
             "hw": {"type": "object", "description": "present when VideoToolbox was asked for (--hw, $FFMPEG_SKILL_HW, a render.py stage, a batch.py item), on export.py when $FFMPEG_SKILL_HW=1 is set but its delivery preset does not take it, and when this ffmpeg build has no libx264/libx265 and an encode ran on VideoToolbox instead: {requested: whether this run's encodes were asked onto VideoToolbox (false for that export, and for the build without libx264/libx265), source: flag|env|auto (auto: nobody asked, the build has no libx264/libx265 and this Apple Silicon machine ran VideoToolbox in its place), used: true|false whether the encoder that ran last is VideoToolbox, null under --dry-run (nothing ran) and when this process ran no encode itself (batch.py: its stages are child processes; its top-level hw gathers the items' requested/source/fallback/notes and each results row carries its item's encoder and hw), fallback: a job VideoToolbox refused (encoder open or compression session failure; nothing else is retried) was re-encoded on the CPU, notes: why an encode stayed on or fell back to the CPU, and, when $FFMPEG_SKILL_HW chose the GPU and it ran, what that costs and that --no-hw opts out}. A VideoToolbox encode also adds a top-level notes line: its quality is not CRF-equivalent. A kind: ffmpeg failure under --hw / $FFMPEG_SKILL_HW carries encoder and hw too"},
             "plan": {"type": "string", "description": "with --plan FILE: the plan document written (the run itself is a dry run)"},
             "verified": {"type": "boolean", "description": "true only when the artifact was written, probed, and every self-check the tool ran (verification) met its target; false under --dry-run"},
-            "verification": {"type": "array", "items": {"type": "object", "properties": {"step": {"type": "string"}, "ok": {"type": "boolean"}}}, "description": "what the tool itself verified: probe, plus loudness (loudness.py, export platform presets) or check (render)"}}
+            "verification": {"type": "array", "items": {"type": "object", "properties": {"step": {"type": "string"}, "ok": {"type": "boolean"}, "stage": {"type": "string"}, "property": {"type": "string"}, "expected": {}, "measured": {}, "delta": {}, "tolerance": {}, "provenance": {"enum": ["specification", "user_specified", "independent_measurement", "input_premeasurement"]}, "attribution": {"enum": ["artifact", "reference", "instrument", "provenance", "unresolved"]}}}, "description": "what the tool itself verified: probe, plus loudness (loudness.py, export platform presets; ok false with reason not_measured when it could not be read), check (render), report.py's sections (loudness, compliance, contact_sheet) and batch.py's items (item). render.py also lists every stage's own steps beyond its artifact probe, tagged with `stage` (a cached stage's as recorded), so its `verified` is the conjunction of every stage's. Since 2.18 a step may carry the property it measured with expected, measured, delta, tolerance and the provenance of the expected value; cut, join and export add a `streams` step comparing the output's video/audio streams with the input's; a step with ok false carries `attribution` (unresolved until a tool knows the cause)"},
+            "unverified": {"type": "array", "items": {"type": "string"}, "description": "2.18: the properties of the output this tool did not measure (the unverified range), e.g. caption's rendered_placement; `verified` covers the measured properties only"},
+            "diagnostics": DIAGNOSTICS_SCHEMA}
     extra: Dict[str, Any] = {}
     if name == "check":
         extra = {"platform": {"type": "string"}, "ok": {"type": "boolean"}, "failed": {"type": "integer"}, "warnings": {"type": "integer"},
-                 "notes": {"type": "array", "items": {"type": "string"}, "description": "present when no --platform was named: youtube was assumed and judgement rows are WARN"},
-                 "checks": {"type": "array", "items": {"type": "object", "properties": {"check": {"type": "string", "description": "row name; --content adds black, frozen and silence; audio FAILs when the track is present but silent (peak <= -50 dBFS)"}, "status": {"enum": ["PASS", "WARN", "FAIL"]}, "value": {}, "expected": {}, "fix": {"type": "string"}, "kind": {"enum": ["format", "judgement"]}}}}}
+                 "input_identity": {"type": "object", "description": "2.24: {size, mtime_ns} of the file graded, the same shape as a writing tool's output_identity"},
+                 "notes": {"type": "array", "items": {"type": "string"}, "description": "present when no --platform was named (youtube was assumed and judgement rows are WARN), or when --compare paired a different number of frames than the reference has"},
+                 "checks": {"type": "array", "items": {"type": "object", "properties": {"check": {"type": "string", "description": "row name; --content adds black, frozen and silence; --compare adds similarity; --expect-identity adds identity; audio FAILs when the track is present but silent (peak <= -50 dBFS)"}, "status": {"enum": ["PASS", "WARN", "FAIL"]}, "value": {}, "expected": {}, "fix": {"type": "string"}, "kind": {"enum": ["format", "judgement"]}}}}}
     elif name == "caption":
         extra = {"transcription": {"type": "object", "description": "with --transcribe: {engine, model, language, routing (why auto chose it), detected_language when auto detected it}; when auto ran the English-only Parakeet model on English assumed, notes says so"},
-                 "caption": {"type": "object", "description": "cue layout: shifted / wrapped / rebalanced / split / extended / dropped counts, plus wrap ('phrase' or 'measured'), phrase_breaks (1.16), broken_inside_word -- atoms hard-sliced at the column edge because they did not fit alone even at the size floor (1.18.4) -- and overlong -- now residual: a single character alone wider than the column. Burn mode: cues_burned -- non-blank cues that overlap [0, duration] and are drawn -- and cues_outside -- non-blank cues wholly outside it (2.2.6); a burn with no visible cue is refused, kind input"},
+                 "caption": {"type": "object", "description": "cue layout: shifted / wrapped / rebalanced / split / extended / dropped counts, plus wrap ('phrase' or 'measured'), phrase_breaks (1.16), broken_inside_word -- atoms hard-sliced at the column edge because they did not fit alone even at the size floor (1.18.4) -- and overlong -- now residual: a single character alone wider than the column. Burn mode: cues_burned -- non-blank cues that overlap [0, duration] and are drawn -- and cues_outside -- non-blank cues wholly outside it (2.2.6); a burn with no visible cue is refused, kind input. --ass: ass_malformed -- Dialogue lines that could not be read and are not counted -- and with --offset ass_shifted / ass_unshifted -- lines moved, and lines whose timestamps could not be read, copied as they were (each count above 0 is also a diagnostics.warnings entry)"},
                  "tracks": {"type": "array", "description": "--mode mux: one entry per subtitle stream in the output ({index, file, language, title, codec, default, cues, kept_from_input}); a stream the input already carried has file null and kept_from_input true (1.16)"},
                  "subtitle_tracks": {"type": "integer", "description": "--mode mux: how many subtitle streams the output carries"},
                  "emoji": {"type": "object", "description": "how the emoji in the text were drawn (mode, overlays, missing)"},
@@ -437,32 +589,46 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
     elif name == "silence":
         extra = {"silences": {"type": "array"}, "keep": {"type": "array"}, "input_duration": {"type": "number"}, "kept_duration": {"type": "number"}, "removed_seconds": {"type": "number"},
                  "speech_aware": {"type": "object", "description": "--speech-aware (1.18): {min_silence, floor, breaths_kept, breaths_kept_seconds, breaths}"},
-                 "filler": {"type": "object", "description": "--filler: {lang, source (whisper-json:FILE | whisper:ENGINE | parakeet:ENGINE), engine, transcription (with --transcribe: {engine, model, language, routing}), removed, removed_count, ...}"},
+                 "filler": {"type": "object", "description": "--filler: {lang, source (whisper-json:FILE | whisper:ENGINE | parakeet:ENGINE), engine, transcription (with --transcribe: {engine, model, language, routing}), removed, removed_count, matched_untimed (listed words in the transcript with no usable timing, not removed), matched_too_long (listed words longer than a filler, kept), ...}"},
                  "notes": {"type": "array", "items": {"type": "string"}, "description": "--filler --transcribe under --engine auto: present when the English-only Parakeet model ran on English assumed (no --filler-lang, no language detected, no Whisper engine installed or none that succeeded); the transcript is wrong if the speech is not English"}}
     elif name == "sync":
         extra = {"reference": {"type": "string"}, "second": {"type": "string"}, "offset_seconds": {"type": "number"}, "confidence": {"type": "number"}, "meaning": {"type": "string"}, "drift": {"type": "object"},
-                 "sources": {"type": "array", "description": "1.18: [{path, offset_s, confidence, drift_ppm}], one per SOURCE; the only per-source shape once more than one SOURCE is given"}}
+                 "sources": {"type": "array", "description": "1.18: [{path, offset_s, confidence, drift_ppm}], one per SOURCE; the only per-source shape once more than one SOURCE is given; with --fix-drift each also carries drift_skipped_reason"},
+                 "drift_skipped_reason": {"type": ["string", "null"], "enum": ["too_short", "low_confidence", None], "description": "--fix-drift, one SOURCE: why the drift correction was not applied (too_short: no tail window far enough from the head; low_confidence: the tail did not correlate), null when it was; also a diagnostics.skipped entry, drift_correction_skipped"}}
     elif name == "look":
         extra = {"outputs": {"type": "array", "items": {"type": "string"}}}
     elif name == "render":
-        extra = {"stages": {"type": "array", "items": {"type": "string"}}, "check": {"type": ["object", "null"]},
+        extra = {"stages": {"type": "array", "items": {"type": "string"}}, "check": {"type": ["object", "null"], "description": "check.py's document for a \"check\" stage with a platform, \"content\": true, or both; when check.py printed none, a failure document with error.reason check_output_unparsed"},
+                 "cache": {"type": ["object", "null"], "description": "--cache: {dir, ffmpeg, hits, misses, miss_reasons: [{stage, reason: not_cached|sidecar_missing|artifact_missing|sidecar_corrupt|artifact_truncated|no_output_path, ...}], saved_seconds, entries, would_hit (--dry-run)}"},
+                 "caption": {"type": ["object", "null"], "description": "the caption stage's own block, forwarded verbatim from caption.py (cue-layout counts and fit-size keys); null without a caption stage"},
+                 "snap": {"type": ["object", "null"], "description": "a project's \"snap\": cut.py's snap block for the first snapped clip, with every clip's in clips; null when nothing was snapped"},
+                 "intermediate_preset": {"type": ["string", "null"], "description": "2.15: the x264/x265 preset the stages before an encoding export ran at (--intermediate-preset, default superfast since 2.16); null when no stage received it (no encoding export reached, --fast, --stop-after before the export, a copy export, or nothing but the export encoded)"},
+                 "notes": {"type": "array", "items": {"type": "string"}, "description": "each stage's own notes, prefixed with its tool (\"export: loudness ... is outside x's ...\")"},
                  "plan": {"type": "string", "description": "when the argument was a plan.json (written by <tool> --plan): its path"},
+                 "plan_sha256": {"type": ["string", "null"], "description": "plan execution: sha256 of the plan file as executed"},
+                 "unbound_inputs": {"type": "array", "items": {"type": "string"}, "description": "plan execution: inputs that did not exist when the plan was made, so carry no fingerprint and were not checked (also a diagnostics.warnings entry, code plan_unbound_inputs)"},
                  "tool": {"type": "string", "description": "plan execution: the tool the plan ran"},
                  "tool_result": {"type": "object", "description": "plan execution: the tool's own --json document"},
                  "timeline": {"type": "object", "description": "--export-timeline: format, rate, duration, frames, clips, transition, "
                               "transition_frames, music, markers, notes, and not_exported (what the project asks for that an "
                               "editor timeline cannot carry)"}}
     elif name == "verify":
-        extra = {"report": {"type": ["string", "null"]}, "files": {"type": "array"}, "failed": {"type": "integer"}, "total": {"type": "integer"}}
+        extra = {"report": {"type": ["string", "null"]},
+                 "files": {"type": "array", "description": "one entry per file: {file, probe, steps, skipped}. A step is {step, ok, seconds, error (one line, for the table)}, plus the tool's verified when it completed, and on a failure its own kind, reason, message, details and exit_code (reason step_timeout or step_output_unparsed when the tool printed no failure document); skipped lists the steps that do not apply as {step, reason: quick|no_video|no_audio|not_hdr|not_multichannel|input_unreadable, message}"},
+                 "failed": {"type": "integer"}, "total": {"type": "integer"}}
     elif name == "batch":
-        extra = {"results": {"type": "array", "description": "one row per input; a row whose recipe ran cut.py carries cut_reencoded (each cut.py call's reencoded) and cut_reencode_reasons (each reason those calls named, once per call)"},
+        extra = {"results": {"type": "array", "description": "one row per input, every input (an interrupted batch included): ok (every step completed), verified (every step also verified what it wrote; false under --dry-run) and unverified ([{step, tool, failed}] naming the steps that did not); a failed row's error {step, tool, kind, message, code, reason, details, hint, exit_code} from the failing step's own document; diagnostics from its steps (tagged with step); cache_miss {reason: output_missing|output_changed|entry_unverifiable, ...} when a cache entry was not served; skipped \"timeout\" or \"interrupted\" for an item that never started and interrupted true for one stopped while running. A row whose recipe ran cut.py carries cut_reencoded (each cut.py call's reencoded) and cut_reencode_reasons (each reason those calls named, once per call)"},
                  "processed": {"type": "integer"}, "total": {"type": "integer"},
                  "cut_stream_copy": {"type": ["object", "null"], "description": "cut.py calls across the folder: {calls, stream_copy, reencoded, stream_copy_rate}; null when no cut.py step ran"},
                  "cut_reencode_reasons": {"type": ["object", "null"], "description": "how many cut.py calls named each reencode_reason ({} when none re-encoded); a re-encoded call whose row came from a cache an earlier 2.x batch wrote, which recorded no reasons, counts as unknown; null when no cut.py step ran"}}
     elif name == "report":
-        extra = {"report": {"type": "string"}, "check": {"type": ["object", "null"]}}
+        extra = {"report": {"type": "string"}, "check": {"type": ["object", "null"], "description": "check.py's document for --platform; null when it was not asked for or could not run (a failing compliance verification step then says why)"}}
     elif name == "export":
-        extra = {"loudness": {"type": "object", "description": "platform presets with audio: the written file's lufs/tp against the platform's target_lufs/target_tp, ok true when inside the spec; normalized true when --normalize ran loudness.py on the file; silent true (lufs \"-inf\", ok false, no normalize) when the written audio is silent"},
+        extra = {"repair": {"type": "object", "description": "--repair (2.24): {before, after}, each {timestamp_warnings, decode_errors} counted over one full decode at -v warning"},
+                 "loudness": {"type": "object", "description": "platform presets with audio: the written file's lufs/tp against the platform's target_lufs/target_tp, ok true when inside the spec; normalized true when --normalize ran loudness.py on the file; silent true (lufs \"-inf\", ok false, no normalize) when the written audio is silent; measured false (lufs, tp and ok null, reason not_measured) when the measurement could not be read"},
+                 "trimmed": {"type": "object", "description": "present when the source was longer than the preset's platform maximum and the export was cut to it (no --allow-long): {from, to} in seconds; notes says so too"},
+                 "non_av_streams": {"type": "object", "description": "the source's subtitle and data streams: {kept: [{type: subtitle|data, index (n-th of its type), codec, language (subtitle), output_codec}], dropped: [{type, index, codec, language, reason: write_failed|gif|not_in_output}]}, read back from the written file (under --dry-run, as planned). A subtitle track is copied when the container holds it as it is, else converted to the container's text track (mov_text in .mp4/.mov, SubRip in .mkv); a trimmed export cuts it at the same point. Both lists are empty for a source with neither"},
+                 "dropped_non_av_streams": {"type": "boolean", "description": "true when non_av_streams.dropped is not empty; a notes line says so too"},
                  "notes": {"type": "array", "items": {"type": "string"}}}
     elif name == "loudness":
         extra = {"measured": {"type": "object", "description": "the loudnorm measurement of the input (input_i, input_tp, input_lra, input_thresh, target_offset); with --measure-only it is the whole result"},
@@ -471,7 +637,8 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
     elif name == "color":
         extra = {"dropped_non_av_streams": {"type": "boolean"},
                  "sdr_path": {"enum": ["tonemap", "gamut"], "description": "--to-sdr only: tonemap for PQ / HLG / Dolby Vision (and --force on an untagged file); gamut for BT.2020 primaries on an SDR transfer, converted to BT.709 without a tone map"},
-                 "notes": {"type": "array", "items": {"type": "string"}, "description": "--to-sdr only: which path was taken and why"},
+                 "notes": {"type": "array", "items": {"type": "string"}, "description": "--to-sdr: which path was taken and why; --retag: why the video was re-encoded (the stream copy failed, or ffprobe still read the old tags on it)"},
+                 "reencoded": {"type": "boolean", "description": "--retag: true when the stream copy could not carry the tags and the video was re-encoded with them on its frames"},
                  "measurements": {"type": "object", "description": "--correct only: signalstats levels of input and output"}}
     elif name == "loop":
         extra = {"boomerang": {"type": "boolean", "description": "--boomerang: frames 0..N-1 then N-2..1, repeated, so neither turnaround frame is shown twice"},
@@ -480,24 +647,28 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
         extra = {"expected_duration": {"type": "number", "description": "seconds requested"},
                  "duration_error_ms": {"type": ["number", "null"], "description": "written minus requested, measured by ffprobe (null under --dry-run)"},
                  "precision": {"enum": ["packet", "sample", "codec_frame", "frame"],
-                               "description": "the whole run's: packet only when nothing re-encoded, the --segments join included (stream copy on a packet/keyframe boundary); sample: decoded audio trimmed to the sample, lossless output; codec_frame: sample-trimmed then framed by a lossy encoder (priming delay adds to the length); frame: re-encoded video"},
+                               "description": "since 3.0.0 the least exact segment's (as least_exact_precision; 2.x: the whole run's, packet only when nothing re-encoded): packet: stream copy on a packet/keyframe boundary; sample: decoded audio trimmed to the sample, lossless output; codec_frame: sample-trimmed then framed by a lossy encoder (priming delay adds to the length); frame: re-encoded video"},
                  "least_exact_precision": {"enum": ["packet", "sample", "codec_frame", "frame"],
                                            "description": "the least exact segment's precision (the order packet, codec_frame, frame, sample); differs from precision only for an audio-only --segments join of copied and re-encoded parts"},
-                 "keyframe_snapped": {"type": "boolean", "description": "precision is packet: the run is a stream copy end to end, which lands on keyframes and packets. Whether a copied start really moved is start_snapped"},
+                 "keyframe_snapped": {"type": ["boolean", "null"], "description": "since 3.0.0 equal to start_snapped: a copied start really moved (2.x: precision was packet, the run a stream copy end to end)"},
                  "start_snapped": {"type": ["boolean", "null"], "description": "measured: true when a copied segment's picture starts more than one frame from its requested start (the keyframe the copy's seek lands on, measured with the seek ffmpeg makes); false when every start is where asked (an MP4 edit list hides the pre-roll, the start is a keyframe, an audio-only copy, or everything re-encoded); null when a copied start was not measured (--dry-run)"},
                  "reencoded": {"type": "boolean"},
-                 "reencode_reason": {"type": "array", "items": {"enum": ["requested", "codec", "vfr", "vfr_inconclusive", "pcm_container", "copy_failed", "tolerance", "concat_fallback"]},
-                                     "description": "why anything was re-encoded, distinct values in first-seen order ([] when nothing was): requested (--accurate), codec (--codec), vfr (a variable-frame-rate source forced --accurate), vfr_inconclusive (its frame timing could not be measured), pcm_container (compressed audio into a .wav), copy_failed (the stream copy errored), tolerance (a keyframe snap past --tolerance), concat_fallback (--segments parts could not be joined by stream copy)"},
+                 "reencode_reason": {"type": "array", "items": {"enum": ["requested", "codec", "vfr", "vfr_inconclusive", "pcm_container", "copy_failed", "stream_lost", "tolerance", "concat_fallback"]},
+                                     "description": "why anything was re-encoded, distinct values in first-seen order ([] when nothing was): requested (--accurate), codec (--codec), vfr (a variable-frame-rate source forced --accurate), vfr_inconclusive (its frame timing could not be measured), pcm_container (compressed audio into a .wav), copy_failed (the stream copy errored), stream_lost (the copy wrote no video or no audio, as an MPEG-TS copy with no keyframe in its window does), tolerance (a keyframe snap past --tolerance), concat_fallback (--segments parts could not be joined by stream copy)"},
                  "segment_precision": {"type": ["array", "null"], "items": {"enum": ["packet", "sample", "codec_frame", "frame"]},
                                        "description": "--segments only: each segment's precision in order; least_exact_precision is the least exact of them (null for a single segment)"},
-                 "edit_list": {"type": "boolean", "description": "--edit-list on a single MP4/MOV stream copy: it kept the edit list it wrote instead of -avoid_negative_ts make_zero, so the keyframe's pre-roll is stored but hidden and the picture and the sound start at the requested time (false for every other path, the default included)"},
+                 "edit_list": {"type": "boolean", "description": "a single MP4/MOV stream copy kept the edit list it wrote instead of -avoid_negative_ts make_zero, so the keyframe's pre-roll is stored but hidden and the picture and the sound start at the requested time (the default since 3.0.0; false under --no-edit-list and for every other path)"},
                  "stored_preroll_seconds": {"type": ["number", "null"], "description": "with edit_list: seconds decoded from the keyframe the copy's seek lands on up to the requested start and hidden by the edit list (a player that ignores edit lists shows them); null otherwise"},
-                 "av_start_skew_seconds": {"type": ["number", "null"], "description": "the output's audio start minus its video start (null when either is missing or under --dry-run); reported, never repaired: on a stream copy only, a warning in notes when it is more than max(2 frames, 0.1 s) away from the source's own skew where the copy's picture starts (the keyframe it began from; the requested start under --edit-list), naming --accurate (and --edit-list for a single MP4/MOV copy whose start snapped)"},
-                 "notes": {"type": "array", "items": {"type": "string"}, "description": "stored pre-roll behind an --edit-list edit list, or an --edit-list copy judged by its video; an A/V start skew with its remedies; a source the default --vfr-guard average took for VFR whose sampled timing is constant (naming --vfr-guard sampled), or a sampled measurement that forced or (--vfr-guard off) skipped a re-encode; a --segments segment ended with the video, or held on its last frame for its sound; a --segments join re-cut because the source uses open GOPs, because a later B-frame .mp4/.mov segment starts between keyframes, or because its join check failed"},
-                 "vfr_check": {"type": "object", "description": "the sampled frame timing of a video input that could still stream-copy: under --vfr-guard average (the default) only when its nominal and average frame rates differ, which re-encodes it (reason vfr) whatever the sample says; under sampled or off on every such input (absent for audio-only input or output, --accurate, --codec, or a --dry-run input a plan has not written yet): {heuristic: true, measured, method: \"sampled\", guard, windows, deltas}. measured is sampled_cfr (every packet interval in up to five 6 s windows within a tick, at least 1 ms and at most half a frame, of its window's median, and the windows agree; the file-start window's first interval is ignored), vfr (under sampled, forces a re-encode, reason vfr) or inconclusive (fewer than 20 intervals or ffprobe failed; under sampled, reason vfr_inconclusive). --vfr-guard off keeps the copy either way, with a note. Variable timing between the windows is not seen"},
+                 "av_start_skew_seconds": {"type": ["number", "null"], "description": "the output's audio start minus its video start (null when either is missing or under --dry-run); reported, never repaired: on a stream copy only, a warning in notes when it is more than max(2 frames, 0.1 s) away from the source's own skew where the copy's picture starts (the keyframe it began from; the requested start with an edit list), naming --accurate (and the edit list for a single MP4/MOV copy whose start snapped under --no-edit-list)"},
+                 "notes": {"type": "array", "items": {"type": "string"}, "description": "stored pre-roll behind an edit list, or an edit-list copy judged by its video; an A/V start skew with its remedies; a source --vfr-guard average took for VFR whose sampled timing is constant (naming --vfr-guard sampled), or a sampled measurement that forced or (--vfr-guard off) skipped a re-encode; a --segments segment ended with the video, or held on its last frame for its sound; a --segments join re-cut because the source uses open GOPs, because a later B-frame .mp4/.mov segment starts between keyframes, or because its join check failed"},
+                 "vfr_check": {"type": "object", "description": "the sampled frame timing of a video input that could still stream-copy: under --vfr-guard average (2.x's default) only when its nominal and average frame rates differ, which re-encodes it (reason vfr) whatever the sample says; under sampled (the default since 3.0.0) or off on every such input (absent for audio-only input or output, --accurate, --codec, or a --dry-run input a plan has not written yet): {heuristic: true, measured, method: \"sampled\", guard, windows, deltas}. measured is sampled_cfr (every packet interval in up to five 6 s windows within a tick, at least 1 ms and at most half a frame, of its window's median, and the windows agree; the file-start window's first interval is ignored, and a seeked window is read from its first keyframe on, because a seek lands mid-GOP and the frames before it are not a full run), vfr (under sampled, forces a re-encode, reason vfr) or inconclusive (fewer than 20 intervals or ffprobe failed; under sampled, reason vfr_inconclusive). --vfr-guard off keeps the copy either way, with a note. Variable timing between the windows is not seen"},
                  "lossless_alternative": {"type": ["string", "null"], "description": "when a lossless cut re-encoded because of the keyframe snap: the --start that would stream-copy instead, and how far it is from the request"},
                  "join_check": {"type": ["object", "null"], "description": "--segments video stream-copy join: the written file measured by demuxing, {packets, expected_packets, max_step_seconds, audio_offset_ms, audio_parts_checked, ok}. expected_packets counts the source's video packets from each part's start keyframe to its end (or the end of the video); max_step_seconds is the largest presentation step (null when vfr_check measured anything but sampled_cfr, e.g. a --vfr-guard off join of variable timing, which checks the count only), and each step at a join must be the step its parts predict within 1 ms; audio_offset_ms is, per part, its sound's shift minus its picture's (+ = sound late) from audio packets matched by CRC32 to the source stream shaped like the joined audio (FFmpeg's default selection may copy one other than a:0; an MPEG-TS source's AAC is hashed without its ADTS headers) (null for a part with no unique match, e.g. digital silence; null as a whole when the source has no audio or the video check failed), and audio_parts_checked counts the measured parts; ok is the conjunction (counts, steps, every measured part within 5 ms), and false means the join was re-cut from the source (concat_fallback) and this is the failed measurement. null for a single segment, audio, --dry-run, --accurate/--codec/a forced re-encode, a segment that re-encoded, or a join that fell back before a copy join was attempted (open GOPs, a later B-frame segment starting between keyframes, parts that differ, a concat error)"},
+                 "declick_ms": {"type": ["number", "null"], "description": "--segments joined by the re-encode (--accurate, a forced re-encode or concat_fallback): the fade in ms asked for on each side of every join, so butted cuts do not click (20 by default, --declick-ms; 0 under --no-declick; the file's own start and end are not faded). Each fade is capped at half its segment, so a segment shorter than twice this is faded for half its length. null when there is no join to fade: a single segment, a source with no audio, or a stream-copy join, whose sound is copied and not faded"},
                  "segment_end_snap_seconds": {"type": ["array", "null"], "items": {"type": ["number", "null"]}, "description": "--segments stream-copy join: per segment, the signed seconds its end moved to the keyframe the copied part stops at (the first keyframe at or after the requested end, never an earlier one; null for a part that runs to the end of the video, a part of a source with no B-frames, which is cut to its requested end as in every 2.x release, or a Matroska/MPEG-TS part, which is not snapped). null as a whole unless the output is those copied parts: a single segment, audio, --dry-run, or any re-encode or fallback"}}
+    elif name == "multicam":
+        extra = {"cuts": {"type": "array", "description": "[[start, end, camera], ...] on the reference timeline: the camera actually rendered. A range whose camera had not started yet plays camera 0, and diagnostics.fallbacks names the camera asked for (code camera_not_started)"},
+                 "offsets_seconds": {"type": "array"}, "confidence": {"type": "array"}}
     elif name == "join":
         extra = {"mode": {"enum": ["video", "audio"]}, "clips": {"type": "integer"}, "transition": {"type": "string"},
                  "expected_duration": {"type": ["number", "null"], "description": "clip lengths minus the transitions; null under --dry-run while an input is pending (its length is unknown)"},
@@ -516,6 +687,11 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
                  "silent": {"type": "array", "description": "--on-silent warn (default), only when a track was silent: [{flag, path, peak_db}] for each --music/--replace/--effects file, or under --duck the voice (flag \"input\"), whose whole-file peak is at or below --silence-threshold (default -50 dBFS); it was mixed anyway. --on-silent fail refuses instead, reason \"silent (peak X dBFS)\" in problems"},
                  "notes": {"type": "array", "items": {"type": "string"}, "description": "present with `silent`: which tracks were silent and how to refuse them"},
                  "audio": {"type": "object", "description": "what the mix was built from: voice (null | light | medium | strong), stereo_widen, effects/effects_volume, and with --music the music_volume plus duck (null when --duck was not given, else the threshold in dB and linear, ratio, attack_ms, release_ms, amount_db actually used)"}}
+    if name in ("overlay", "graphics", "caption", "grid"):
+        extra["font_used"] = FONT_USED_SCHEMA
+    if name == "cropdetect":
+        extra.update({"windows": {"type": "integer", "description": "sampled windows (--samples)"},
+                      "windows_failed": {"type": "integer", "description": "windows ffmpeg could not decode and that were skipped (a cropdetect_windows_failed warning when > 0); every window failing is a kind ffmpeg failure"}})
     props = dict(base)
     props.update(extra)
     notes = props.get("notes")
@@ -532,6 +708,13 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
     return {"type": "object", "properties": props, "required": required, "additionalProperties": True}
 
 @functools.lru_cache(maxsize=1)
+def _unverified_table() -> Dict[str, List[str]]:
+    """emit()'s per-tool unverified range, read where the results are made so the two cannot differ."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from _common.emit import UNVERIFIED
+    return UNVERIFIED
+
+
 def skill_examples() -> Dict[str, List[Dict[str, Any]]]:
     """1.20.0: per-tool `examples`, parsed from SKILL.md's "User says" / "Do" table -- the
     same facts that table already states, machine-readable instead of prose-only. A row
@@ -722,6 +905,139 @@ def _version_line(binary: str) -> Optional[str]:
     return m.group(1) if m else (first[0] if first else "unknown")
 
 
+# ----------------------------------------------------------------------------- FFmpeg security advisories
+# doctor's `ffmpeg_security`: a small, dated, hand-maintained table of high-severity FFmpeg CVEs and
+# the first upstream point release on each branch that carries the fix. ffmpeg-skill does not ship
+# FFmpeg, so a user stays exposed to a decoder bug until they upgrade; doctor says so. It reads the
+# table and the local `-version` line only -- no network call, ever (execution.network: false).
+#
+# Source: https://ffmpeg.org/security.html (each release section lists the CVEs it fixes), checked
+# on FFMPEG_ADVISORIES_CHECKED. A branch absent from `fixed_in` had no release listed with the fix
+# on that date. Only CVEs that page lists go in: AISLE's batch (CVE-2026-64830..64835) was not on it
+# on 2026-10-22, so it has no row yet -- add one, with its releases, when the page lists them.
+# When editing: update FFMPEG_ADVISORIES_CHECKED, docs/contract.md and the CHANGELOG together.
+FFMPEG_ADVISORY_SOURCE = "https://ffmpeg.org/security.html"
+FFMPEG_ADVISORIES_CHECKED = "2026-10-22"
+FFMPEG_ADVISORIES: List[Dict[str, Any]] = [
+    {"cve": "CVE-2026-8461", "name": "PixelSmash", "component": "MagicYUV decoder",
+     "kind": "heap out-of-bounds write", "cvss": 8.8,
+     # security.html lists the fix under 9.0, 8.1.2 and 8.0.3; no 7.1.x/7.0.x/6.1.x release carries it
+     "fixed_in": {"8.0": "8.0.3", "8.1": "8.1.2", "9.0": "9.0"}},
+]
+
+
+def _parse_ffmpeg_version(text: Optional[str]) -> Optional[tuple]:
+    """(major, minor, patch) from an `ffmpeg -version` token: `6.1.1`, `8.0`, `n7.1.2`, and distro
+    builds that append to the upstream number (`8.0.1-3ubuntu2`, `7.1.2-0+deb13u1`,
+    `8.1.2-full_build-www.gyan.dev`). None for anything else -- a git snapshot (`N-12345-g...`,
+    `2026-10-01-git-...`) has no release number to compare, and a guess would be a false alarm."""
+    if not text:
+        return None
+    m = re.match(r"n?(\d+)\.(\d+)(?:\.(\d+))?(?![\d.])", text.strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+
+
+def _vstr(v: tuple) -> str:
+    return ".".join(str(x) for x in (v if v[2] else v[:2]))
+
+
+def _advisory_hits(version: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+    """The table's rows this version is older than (None: the version could not be parsed). A
+    version on a branch the table lists is compared with that branch's fixing release; one on an
+    older branch with no fixing release is compared with the oldest release that has the fix."""
+    v = _parse_ffmpeg_version(version)
+    if v is None:
+        return None
+    hits = []
+    branch = f"{v[0]}.{v[1]}"
+    for adv in FFMPEG_ADVISORIES:
+        fixes = {k: _parse_ffmpeg_version(f) for k, f in adv["fixed_in"].items()}
+        if branch in fixes:
+            first, on_branch = fixes[branch], True
+        else:
+            first, on_branch = min(fixes.values()), False
+        if v < first:
+            hits.append({"cve": adv["cve"], "name": adv["name"], "component": adv["component"], "kind": adv["kind"],
+                         "cvss": adv["cvss"], "first_fix": _vstr(first), "fix_on_branch": on_branch, "branch": branch})
+    return hits
+
+
+def _update_hint(version: str, source: Optional[str]) -> str:
+    """How to update the FFmpeg this version string came from, as one short phrase."""
+    low = version.lower()
+    if "ubuntu" in low or "+deb" in low or "debian" in low:
+        return "sudo apt update && sudo apt install --only-upgrade ffmpeg"
+    system = platform.system()
+    if system == "Darwin":
+        return "brew upgrade ffmpeg-full" if source == "homebrew-ffmpeg-full" else "brew upgrade ffmpeg, or the package manager it came from"
+    if system == "Windows":
+        return "winget upgrade Gyan.FFmpeg, or a newer build from https://ffmpeg.org/download.html"
+    if system == "Linux":
+        return "your distribution's package update, e.g. sudo apt install --only-upgrade ffmpeg or sudo dnf upgrade ffmpeg"
+    return "a newer build from https://ffmpeg.org/download.html"
+
+
+def _advisory_warning(binary: str, version: str, hits: List[Dict[str, Any]], source: Optional[str]) -> str:
+    """One stderr/`warnings` line. It never says the build IS vulnerable: a distro package
+    (Ubuntu `8.0.1-3ubuntu2`, Debian `+deb13u1`) backports fixes without changing the upstream
+    number, and only the upstream number is visible here."""
+    parts = []
+    for h in hits:
+        where = (f"first fixed on the {h['branch']} branch in {h['first_fix']}" if h["fix_on_branch"]
+                 else f"no {h['branch']} release is listed with the fix; the oldest that has it is {h['first_fix']}")
+        parts.append(f"{h['cve']} ({h['component']} {h['kind']}, CVSS {h['cvss']:g}; {where})")
+    return (f"warning: {binary} {version} is older than the first upstream FFmpeg release that fixes "
+            f"{'; '.join(parts)}. A distribution package may have backported the fix without changing the "
+            f"upstream version, so this is not proof the build is vulnerable: update it "
+            f"({_update_hint(version, source)}). Source: {FFMPEG_ADVISORY_SOURCE}, checked {FFMPEG_ADVISORIES_CHECKED}.")
+
+
+def ffmpeg_security(versions: Dict[str, Optional[str]], sources: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
+    """doctor's `ffmpeg_security`: per binary {version, status, advisories}, and `warnings`, one line
+    per distinct version that is older than a fix. `status`: `older_than_fix`, `not_older`, or
+    `unknown` (no binary, or a version this table cannot compare -- which produces no warning).
+    Informational like `fonts`/`gpu_encoders`: it never moves `ok`, a tool's `usable` or the exit code."""
+    sources = sources or {}
+    out: Dict[str, Any] = {"source": FFMPEG_ADVISORY_SOURCE, "checked": FFMPEG_ADVISORIES_CHECKED, "warnings": []}
+    warned = set()
+    for binary in ("ffmpeg", "ffprobe"):
+        version = versions.get(binary)
+        hits = _advisory_hits(version)
+        status = "unknown" if hits is None else ("older_than_fix" if hits else "not_older")
+        out[binary] = {"version": version, "status": status, "advisories": hits or []}
+        if hits and version not in warned:
+            warned.add(version)
+            out["warnings"].append(_advisory_warning(binary, str(version), hits, sources.get(binary)))
+    return out
+
+
+# 3.0.0 removed Python 3.9 (deprecated in 2.10.9) and FFmpeg 5.x (deprecated in 2.14.0): REMOVED
+# below. doctor reports a floor it is below in `unsupported` and as `ok: false`; bin/install.js
+# refuses Python below 3.10 and prints the same FFmpeg line (a test keeps the lines equal); every
+# tool refuses an FFmpeg it can read as older than 6.1 (runner.require_tool).
+MIN_PYTHON = (3, 10)
+MIN_FFMPEG = (6, 1)
+PYTHON_UNSUPPORTED = ("error: Python {v} is not supported since ffmpeg-skill 3.0.0 (3.9 was deprecated in 2.10.9; "
+                      "CPython 3.9 is end of life): use Python 3.10+.")
+FFMPEG_UNSUPPORTED = ("error: FFmpeg {v} is not supported since ffmpeg-skill 3.0.0 (5.x was deprecated in 2.14.0): "
+                      "use FFmpeg 6.1+.")
+
+
+def python_unsupported(version_info: Optional[tuple] = None) -> Optional[str]:
+    """The unsupported-interpreter line for this Python, or None when it is 3.10 or later."""
+    vi = tuple(version_info if version_info is not None else sys.version_info)[:2]
+    return PYTHON_UNSUPPORTED.format(v=f"{vi[0]}.{vi[1]}") if vi < MIN_PYTHON else None
+
+
+def ffmpeg_unsupported(version: Optional[str]) -> Optional[str]:
+    """The unsupported-FFmpeg line for this version token, or None (6.1 or later, or not a release
+    number: a git snapshot is not refused, as with the security advisory)."""
+    v = _parse_ffmpeg_version(version)
+    return FFMPEG_UNSUPPORTED.format(v=f"{v[0]}.{v[1]}") if v and tuple(v[:2]) < MIN_FFMPEG else None
+
+
 def _exe_report() -> Dict[str, Any]:
     """`ffmpeg_path` / `ffmpeg_source` / `ffprobe_path` / `ffprobe_source`: which binary the tools run
     and why ("path": what PATH resolves; "homebrew-ffmpeg-full": macOS, a lean Homebrew ffmpeg on
@@ -736,7 +1052,8 @@ def _exe_report() -> Dict[str, Any]:
 
 
 def _whisper_available() -> bool:
-    if shutil.which("whisper-cli") or shutil.which("whisper-cpp") or shutil.which("whisper"):
+    from _common.runner import safe_which
+    if safe_which("whisper-cli") or safe_which("whisper-cpp") or safe_which("whisper"):
         return True
     return importlib.util.find_spec("faster_whisper") is not None or importlib.util.find_spec("whisper") is not None
 
@@ -745,7 +1062,8 @@ def _parakeet_available() -> bool:
     """parakeet-mlx on PATH, or parakeet-cli with a model it can find (PARAKEET_CPP_MODEL or a
     .gguf in ~/.cache/parakeet.cpp) -- the same test the speech bridge applies before running it."""
     from _common.asr import _parakeet_available as runtime_check  # the bridge's own test, not a copy of it
-    return any(runtime_check(e, shutil) for e in ("parakeet-mlx", "parakeet.cpp"))
+    from _common.runner import SafeShutil
+    return any(runtime_check(e, SafeShutil(shutil)) for e in ("parakeet-mlx", "parakeet.cpp"))
 
 
 def _hw_default() -> Dict[str, Any]:
@@ -836,7 +1154,8 @@ def _font_available(font_name: str) -> Dict[str, Any]:
     silently renders with a different typeface. `fc-match` is queried instead, since it reports the
     family fontconfig actually resolved to; that only equals the request when the font is installed.
     """
-    exe = shutil.which("fc-match")
+    from _common.runner import safe_which
+    exe = safe_which("fc-match")
     if not exe:
         return {"status": "unknown", "detail": "fc-match not on PATH; drawtext succeeding proves nothing (fontconfig substitutes silently), so availability cannot be verified"}
     try:
@@ -973,12 +1292,23 @@ def doctor() -> Dict[str, Any]:
     notes = [f"filter:drawtext: {drawtext_probe['note']}"] if drawtext_probe and drawtext_probe.get("note") else []
     notes += [f"{cap}: not in this ffmpeg build; the tools that need it encode with {alt[8:]} (VideoToolbox) instead, so their output is "
               "not CRF-equivalent (the result's `encoder`/`hw` say so)" for cap, alt in sorted(covered.items())]
+    versions = {"ffmpeg": _version_line("ffmpeg"), "ffprobe": _version_line("ffprobe")}
+    exes = _exe_report()
+    # 3.0.0: below the requirements floor is a broken install, not an advisory
+    unsupported = [line for line in (python_unsupported(), ffmpeg_unsupported(versions["ffmpeg"])) if line]
+    probe_line = ffmpeg_unsupported(versions["ffprobe"])
+    if probe_line:
+        probe_line = probe_line.replace("error: FFmpeg ", "error: ffprobe ", 1)
+        if probe_line not in unsupported:
+            unsupported.append(probe_line)
     return {
         "version": skill_version(),
         "python": ".".join(str(x) for x in sys.version_info[:3]),
-        "ffmpeg": _version_line("ffmpeg"),
-        "ffprobe": _version_line("ffprobe"),
-        **_exe_report(),
+        "ffmpeg": versions["ffmpeg"],
+        "ffprobe": versions["ffprobe"],
+        **exes,
+        # non-fatal: never part of `ok`, `usable` or the exit code
+        "ffmpeg_security": ffmpeg_security(versions, {b: exes.get(f"{b}_source") for b in versions}),
         "available": available,
         "missing": missing_required,
         "missing_optional": missing_optional,
@@ -986,8 +1316,9 @@ def doctor() -> Dict[str, Any]:
         "detection": {k: {"status": v["status"], "count": len(v["names"]), "detail": v["detail"]} for k, v in listings.items()},
         "errors": errors,
         **({"notes": notes} if notes else {}),
-        "ok": not missing_required and not unknown_required,
-        "tools": _tool_usability(state, drawtext_crashed, covered),
+        "unsupported": unsupported,
+        "ok": not missing_required and not unknown_required and not unsupported,
+        "tools": _tool_usability(state, drawtext_crashed, covered, unsupported),
         "covered_by": covered,
         "gpu_encoders": _gpu_encoders(listings["encoders"]),
         "hw": _hw_default(),
@@ -1110,22 +1441,31 @@ def _capability_fix_hint(cap: str, drawtext_crashed: bool = False) -> str:
     return f"'{cap}' is not available; see docs/contract.md"
 
 
-def _tool_usability(state: Dict[str, str], drawtext_crashed: bool = False, covered: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+def _tool_usability(state: Dict[str, str], drawtext_crashed: bool = False, covered: Optional[Dict[str, str]] = None,
+                    unsupported: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
     """Per-tool usable/missing/unknown, folded from the same capability `state` doctor already
     computed. Answers "can I run this tool on this machine today", not just "what capabilities
     exist" -- a caller reading only `available`/`missing` still has to cross-reference each tool's
     own required-capability list by hand to answer that. A required capability in `covered`
-    (libx264 replaced by VideoToolbox on this machine) blocks nothing; the tool lists it in `covered_by`."""
+    (libx264 replaced by VideoToolbox on this machine) blocks nothing; the tool lists it in `covered_by`.
+    A Python or FFmpeg below the 3.0.0 floor (`unsupported`) makes every tool unusable: each one
+    refuses to start on it."""
     covered = covered or {}
     tools: Dict[str, Dict[str, Any]] = {}
     for name, meta in TOOL_META.items():
         required = list(meta["required"])
         missing = [c for c in required if state.get(c) == "missing" and c not in covered]
         unknown = [c for c in required if state.get(c) == "unknown"]
-        entry: Dict[str, Any] = {"usable": "no" if missing else ("unknown" if unknown else "yes")}
+        entry: Dict[str, Any] = {"usable": "no" if missing or unsupported else ("unknown" if unknown else "yes")}
+        fixes = []
         if missing:
             entry["missing"] = missing
-            entry["fix"] = "; ".join(dict.fromkeys(_capability_fix_hint(c, drawtext_crashed) for c in missing))
+            fixes += [_capability_fix_hint(c, drawtext_crashed) for c in missing]
+        if unsupported:
+            entry["unsupported"] = list(unsupported)
+            fixes.append("install Python 3.10+ and FFmpeg 6.1+ (ffmpeg and ffprobe from one build)")
+        if fixes:
+            entry["fix"] = "; ".join(dict.fromkeys(fixes))
         if unknown:
             entry["unknown"] = unknown
         via = {c: covered[c] for c in required if c in covered}
@@ -1258,6 +1598,8 @@ def tool_spec(name: str, version: str) -> Dict[str, Any]:
         "reencodes_audio": REENCODE_META.get(name, {}).get("audio", "conditional"),
         **({"reencode_note": REENCODE_META[name]["note"]} if REENCODE_META.get(name, {}).get("note") else {}),
         "requires_visual_verification": meta["visual"],
+        # 2.18: what `verified` does not cover for this tool (the result's `unverified`)
+        "unverified_properties": list(_unverified_table().get(name, [])),
         "audio_only": meta["audio_only"],
         "video_required": meta["video_required"],
         "deterministic_inputs": meta["deterministic"],
@@ -1272,13 +1614,13 @@ def tool_spec(name: str, version: str) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------- deprecations
 # What the next major removes, announced here per docs/contract.md's three-step deprecation policy:
 # step 1 (this list, --help text and the CHANGELOG) in a minor, step 2 keeps it working, step 3
-# removes it in the major. `where` says which surface a caller sees it on. Empty at 2.0.0: all
-# five 1.10.0 deprecations were settled by it (REMOVED below).
+# removes it in the major. `where` says which surface a caller sees it on. Empty at 2.0.0 and at
+# 3.0.0: every deprecation announced in 1.x and 2.x was settled by its major (REMOVED below).
 DEPRECATED: List[Dict[str, str]] = []
 
-# What 2.0.0 removed or changed, with the version that deprecated each: the "Removed" half of the
-# policy's step 3, kept in the contract so a caller migrating from 1.x can diff it instead of reading
-# a CHANGELOG. docs/contract.md's "What 2.0 changed" table is written from this list.
+# What each major removed or changed, with the version that deprecated each: the "Removed" half of
+# the policy's step 3, kept in the contract so a caller migrating can diff it instead of reading a
+# CHANGELOG. docs/contract.md's "What 2.0 changed" and "What 3.0 changed" tables are written from it.
 REMOVED: List[Dict[str, str]] = [
     {"what": "--crf as an alias of --quality on every re-encoding tool that takes --quality (export.py keeps --crf: its preset chooses the encoder)",
      "since": "1.10.0", "removed_in": "2.0.0", "where": "cli",
@@ -1295,6 +1637,12 @@ REMOVED: List[Dict[str, str]] = [
     {"what": "the result_v2 preview key and FFMPEG_SKILL_RESULT_V2 (the v1 top-level keys it was to replace were un-deprecated: they are the 2.0 shape)",
      "since": "1.10.0", "removed_in": "2.0.0", "where": "json",
      "replacement": "the top-level keys, unchanged from 1.x; --json-brief for a short document"},
+    {"what": "running on Python 3.9 (the requirements.python floor)",
+     "since": "2.10.9", "removed_in": "3.0.0", "where": "behaviour",
+     "replacement": "Python 3.10 or later; the npx installer skips an older interpreter and doctor reports it as unsupported (ok: false)"},
+    {"what": "running on FFmpeg 5.x (the requirements.ffmpeg floor)",
+     "since": "2.14.0", "removed_in": "3.0.0", "where": "behaviour",
+     "replacement": "FFmpeg 6.1 or later; every tool refuses an older one it can read (kind: missing_tool), and doctor reports it as unsupported"},
 ]
 
 
@@ -1512,7 +1860,7 @@ def build(detect: bool = True) -> Dict[str, Any]:
             },
             "not_provided": ["AI reasoning", "decisions", "production plans", "project IR", "approvals", "network access", "transcription engine"],
         },
-        "requirements": {"python": ">=3.9 (standard library only)", "ffmpeg": ">=5.0", "ffprobe": ">=5.0", "node": ">=16 (npx installer only)"},
+        "requirements": {"python": ">=3.10 (standard library only)", "ffmpeg": ">=6.1", "ffprobe": ">=6.1", "node": ">=16 (npx installer only)"},
         "execution": {
             "shell": False,
             "arbitrary_executables": False,
@@ -1557,8 +1905,26 @@ def build(detect: bool = True) -> Dict[str, Any]:
         },
         "json_output": {
             "success": {"status": "completed", "exit_code": 0, "stdout": "one JSON document (output_schema)"},
-            "failure": {"status": "failed", "exit_code": "non-zero (127 when ffmpeg/ffprobe is missing)", "stdout": "{\"status\": \"failed\", \"exit_code\": N, \"error\": {\"kind\": ..., \"message\": ...}, \"commands\": [...]} when --json was given", "stderr": "human-readable message"},
-            "error_kinds": {"input": "missing or unsuitable input, bad arguments", "ffmpeg": "ffmpeg/ffprobe returned an error (message carries the last stderr lines)", "output": "ffmpeg exited 0 but the artifact is missing, empty or unreadable (an empty file is removed)", "missing_tool": "ffmpeg or ffprobe not on PATH", "timeout": "one ffmpeg/ffprobe run exceeded --timeout (default 1800 s, FFMPEG_SKILL_TIMEOUT) and was killed; partial output removed; exit 124", "verification": "the tool ran but its result failed the requested check: check.py platform rows (checks attached), render.py's check stage (output written, check attached), batch.py items (results attached), verify.py steps (files attached); exit 1", "interrupted": "the tool received SIGINT or SIGTERM: the running ffmpeg (or sibling script) was stopped and its partial output removed; exit 130 or 143"},
+            "failure": {"status": "failed", "exit_code": "non-zero (127 when ffmpeg/ffprobe is missing)", "stdout": "{\"status\": \"failed\", \"exit_code\": N, \"error\": {\"kind\": ..., \"message\": ..., \"code\": ..., \"retryable\": false}, \"commands\": [...]} when --json was given; a refusal adds error.reason (error_reasons) and error.details (the facts the message is written from), and a run that recorded warnings, fallbacks or skipped steps before failing carries diagnostics", "stderr": "human-readable message",
+                        "error": {"kind": "error_kinds", "message": "the reason in prose", "code": "a static relabelling of kind", "retryable": "always false",
+                                  "hint": "optional: the flag change that would make a retry meaningful",
+                                  "reason": "optional, on refusals: a stable code from error_reasons",
+                                  "details": "optional, with reason: an object of the facts behind the refusal (paths, expected and actual values)"},
+                        "diagnostics": DIAGNOSTICS_SCHEMA["description"]},
+            "error_reasons": ERROR_REASONS,
+            "diagnostic_codes": {code: {"bucket": bucket, "meaning": meaning} for code, (bucket, meaning) in DIAGNOSTIC_CODES.items()},
+            "audit_log": {"format": "JSON lines, appended: {ts, tool, event, pid, plan_sha256 (plan events), details}",
+                          "events": {"plan_rejected": "render.py refused a plan (details: the refusal's error.details plus reason)",
+                                     "lock_takeover": "a stale output lock was taken over (details: lock, output, pid, pid_alive, deadline, why)",
+                                     "output_unlocked": "no output lock could be created and the run went on without one",
+                                     "output_is_input_refused": "the output-is-input refusal (only when an audit log was named)",
+                                     "cache_entry_damaged": "render.py --cache: a damaged entry (details: stage, reason, key, sidecar or artifact, sizes)",
+                                     "batch_cache_reset": "batch.py: .ffskill_cache.json did not parse and was started empty (details: path, size, error)"},
+                          "location": "render.py --audit-log FILE when given; otherwise a refused plan's <plan>.audit.jsonl, a lock event's "
+                                      "hidden .<output>.ffskill-audit.jsonl beside the output, and a cache event's .ffskill-audit.jsonl in the "
+                                      "cache directory (render.py --cache DIR) or the batch's output_dir. Never written under --dry-run; a write that "
+                                      "fails is a diagnostics.warnings entry (audit_log_unwritable), never a failure"},
+            "error_kinds": {"input": "missing or unsuitable input, bad arguments", "ffmpeg": "ffmpeg/ffprobe returned an error (message carries the last stderr lines)", "output": "ffmpeg exited 0 but the artifact is missing, empty or unreadable (an empty file is removed)", "missing_tool": "ffmpeg or ffprobe not on PATH, or older than the supported 6.1 (error.reason ffmpeg_unsupported)", "timeout": "one ffmpeg/ffprobe run exceeded --timeout (default 1800 s, FFMPEG_SKILL_TIMEOUT) and was killed; partial output removed; exit 124", "verification": "the tool ran but its result failed the requested check: check.py platform rows (checks attached), render.py's check stage (output written, check attached), batch.py items (results attached), verify.py steps (files attached), color.py --retag (output written, but ffprobe does not read the requested colour tags on it); exit 1", "interrupted": "the tool received SIGINT or SIGTERM: the running ffmpeg (or sibling script) was stopped and its partial output removed; exit 130 or 143"},
             "success_criterion": "exit 0 AND the output exists AND is non-empty AND ffprobe reads a stream from it; only then is status completed printed and the output probe attached",
         },
         "capabilities": caps,
@@ -1576,6 +1942,12 @@ def main() -> int:
     args = ap.parse_args()
     if args.command == "doctor":
         d = doctor()
+        # On stderr in both modes, so `doctor --json`'s stdout stays one JSON document: an
+        # unsupported Python or FFmpeg (also in the document as `unsupported`, and part of `ok`)
+        # and the FFmpeg security advisories (`ffmpeg_security.warnings`, never part of `ok`).
+        for line in d["unsupported"] + d["ffmpeg_security"]["warnings"]:
+            if line:
+                print(line, file=sys.stderr)
         if args.json:
             print(json.dumps(d, indent=2, sort_keys=True))
         else:
@@ -1611,7 +1983,8 @@ def main() -> int:
         if d["ok"]:
             return 0
         # 1: something required is missing; 2: nothing proven missing but a required capability is unknown
-        return 1 if d["missing"] else 2
+        # an unsupported Python/FFmpeg is a known failure, like a missing capability (not "unknown")
+        return 1 if d["missing"] or d.get("unsupported") else 2
     print(json.dumps(build(detect=not args.static), indent=2, sort_keys=True, ensure_ascii=False))
     return 0
 

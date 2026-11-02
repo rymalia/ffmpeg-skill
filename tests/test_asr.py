@@ -300,11 +300,13 @@ def _faster_whisper_with_words(detected=None):
         def __init__(self, *a, **k):
             pass
 
-        def transcribe(self, wav, language=None, word_timestamps=False):
+        def transcribe(self, wav, language=None, word_timestamps=False, **kw):
             mod.languages.append(language)
+            mod.prompts.append(kw.get("initial_prompt"))
             return iter([Segment()]), type("Info", (), {"language": detected})()
     mod.WhisperModel = WhisperModel
     mod.languages = []
+    mod.prompts = []
     return mod
 
 
@@ -428,9 +430,10 @@ class EngineRefusalTests(_SrtDir, _BridgeHarness, unittest.TestCase):
     def test_nothing_installed_is_still_no_engine(self):
         msg, kind, _ = self._refusal([], lambda: asr.transcribe_result("talk.mp4", self.srt, None, "base"))
         self.assertTrue(msg.startswith("no local speech-to-text engine found for --transcribe."), msg)
-        self.assertEqual(kind, "input")
+        self.assertEqual((kind, _["error_extra"]["reason"]), ("missing_tool", "asr_engine_missing"), "a missing dependency, not a bad argument")
         msg, kind, _ = self._refusal([], lambda: asr.transcribe_words_result("talk.mp4"))
         self.assertTrue(msg.startswith("no local speech-to-text engine found for --filler --transcribe."), msg)
+        self.assertEqual((kind, _["error_extra"]["reason"]), ("missing_tool", "asr_engine_missing"))
 
     def test_parakeet_passed_over_for_another_language_is_named(self):
         msg, kind, extra = self._refusal(["parakeet-mlx"], lambda: asr.transcribe_result("talk.mp4", self.srt, "fr", "base"))
@@ -521,6 +524,23 @@ class WhisperLanguageTests(_SrtDir, _BridgeHarness, unittest.TestCase):
             fw = _faster_whisper_with_words()
             run = self._with(["parakeet-mlx"], lambda: asr.transcribe_words_result("talk.mp4"), faster_whisper=fw)
             self.assertEqual((run.engine, fw.languages, run.facts["language"]), ("faster-whisper", ["ja"], "ja"))
+
+    def test_the_filler_prompt_reaches_each_whisper_engine(self):
+        """Whisper leaves "uh"/"um" out of its text unless primed, so silence.py --filler found
+        none on clean speech; the prompt it passes reaches whisper.cpp (--prompt) and
+        faster-whisper (initial_prompt), and nothing is passed when there is no prompt."""
+        fake = _FakeEngines(["whisper-cli"])
+        with mock.patch.object(asr, "detect_language", return_value="fr"):
+            self._with([], lambda: asr.transcribe_words_result("talk.mp4", prompt="Uh, um."), fake=fake)
+            cmd = fake.ran("whisper-cli")[0]
+            self.assertEqual(cmd[cmd.index("--prompt") + 1], "Uh, um.")
+            fake = _FakeEngines(["whisper-cli"])
+            self._with([], lambda: asr.transcribe_words_result("talk.mp4"), fake=fake)
+            self.assertNotIn("--prompt", fake.ran("whisper-cli")[0])
+            fw = _faster_whisper_with_words()
+            self._with([], lambda: asr.transcribe_words_result("talk.mp4", prompt="Uh, um."), faster_whisper=fw)
+            self._with([], lambda: asr.transcribe_words_result("talk.mp4"), faster_whisper=fw)
+            self.assertEqual(fw.prompts, ["Uh, um.", None])
 
     def test_undetected_speech_routed_to_whisper_lets_whisper_cpp_detect(self):
         fake = _FakeEngines(["whisper-cli", "parakeet-mlx"])
@@ -717,7 +737,8 @@ class AutoRoutingFallbackTests(_SrtDir, _BridgeHarness, unittest.TestCase):
         run = self._with([], lambda: asr.transcribe_result("talk.mp4", self.srt, "en", "base"), fake=fake,
                          env={"PARAKEET_OUTPUT_TEMPLATE": "{filename}_{date}"})
         self.assertEqual(run.engine, "parakeet-mlx")
-        (_, env), = fake.calls
+        # 3.0.0: the FFmpeg 6.1 floor reads `ffprobe -version` first; only the engine call matters here
+        (_, env), = [c for c in fake.calls if c[0][0].endswith("parakeet-mlx")]
         self.assertNotIn("PARAKEET_OUTPUT_TEMPLATE", env)
 
 

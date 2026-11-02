@@ -5,6 +5,24 @@ bullets. SKILL.md keeps one line per item and points here with the anchors below
 nothing here is optional reading when the job touches that area — it is the
 detail, not an aside.
 
+## One-line index
+
+The one-line form each section below starts from (SKILL.md keeps a shorter line per item).
+
+- HDR (iPhone, HDR10) re-encoded through an SDR path goes flat; the scripts keep HDR; `hdr: true` is a real PQ/HLG/DV signal, `bt2020_or_hdr: true` also BT.2020 SDR. -> [#hdr-and-colour](#hdr-and-colour)
+- Log footage (S-Log/V-Log/C-Log) is tagged SDR and looks grey: `probe.py --analyze`, then `color.py --lut` first. -> [#log-footage](#log-footage)
+- A `-c copy` cut can start on a wrong/frozen frame; `cut.py` re-encodes past a 0.5 s snap, respect it; an .mp4/.mov copy's edit list hides the pre-roll (`--no-edit-list` off). -> [#keyframe-cuts](#keyframe-cuts)
+- VFR phone/screen clips: re-encodes go CFR; `cut.py` re-encodes measured VFR (`--vfr-guard average`: 2.x rule); odd rate: `fit.py --fps`. -> [#variable-frame-rate](#variable-frame-rate)
+- Sync/multicam `confidence` under 0.3 (or a huge offset) is suspect — check every camera; these align audio, never lip sync. -> [#sync-multicam-and-drift](#sync-multicam-and-drift)
+- "Normalised" audio can still clip (check true peak); ambience at -40 LUFS or below must never be raised to a speech target. -> [#loudness-and-ambience](#loudness-and-ambience)
+- Captions burned before a crop/resize land off-frame; burned small then upscaled by `export.py` come out soft. -> [#captions-fonts-and-text-order](#captions-fonts-and-text-order)
+- Emoji need `--emoji-assets DIR` (a PNG per glyph) to render in colour; without it they come out monochrome, reported. -> [#emoji](#emoji)
+- Non-Latin text picks a font by script (`graphics.py` shapes Devanagari, Bengali, Tamil, Thai via libass; drawtext cannot); no font = failed job. -> [#fonts-by-script](#fonts-by-script)
+- `--fit crop` 16:9→9:16 throws away 70% of the width; "60 seconds" by speed or by trim are different answers — say which and why. -> [#reframing-fps-and-duration](#reframing-fps-and-duration)
+- TikTok/Reels cover the bottom fifth and right column with their own UI — templates keep text out of those zones; `look.py --safe tiktok` shows them. -> [#platform-safe-zones](#platform-safe-zones)
+- `scenes.py --highlights` ranks by loudness (or duration), never by meaning: check the sheet before trusting picks. -> [#highlights](#highlights)
+- CPU re-encodes: x264 `medium`. -> [#chaining-and-speed](#chaining-and-speed)
+
 ## Colour, HDR and Log
 
 ### HDR and colour
@@ -46,10 +64,11 @@ S-Log, V-Log and C-Log look grey and low-contrast but are tagged SDR. Run
 ### Keyframe cuts
 A lossless `cut.py` result may start up to one GOP (often 1–10 s) earlier than
 requested (`start_snapped: true`); the script re-encodes automatically when the
-deviation exceeds 0.5 s. With `--edit-list`, a single-segment `.mp4`/`.m4v`/`.mov` copy
-keeps the MP4 edit list instead: the pre-roll back to the keyframe is stored but
-hidden, so the picture starts at the requested time (`edit_list`,
-`stored_preroll_seconds`). A player or tool that ignores edit lists shows that
+deviation exceeds 0.5 s. A single-segment `.mp4`/`.m4v`/`.mov` copy keeps the MP4
+edit list by default (since 3.0.0; `--no-edit-list` starts the file at the keyframe
+instead): the pre-roll back to the keyframe is stored but hidden, so the picture
+starts at the requested time (`edit_list`, `stored_preroll_seconds`, and
+`start_snapped: false`). A player or tool that ignores edit lists shows that
 pre-roll. The **end** still lands on a packet boundary, a few frames long, and
 those extra frames can skip. `.mkv` output has no edit list, and a `--segments`
 join shows each part from its keyframe. On B-frame video an `.mp4`/`.mov`
@@ -65,7 +84,7 @@ a start a few frames before a keyframe can begin at that keyframe or one GOP
 earlier (`start_snapped: true` either way).
 `av_start_skew_seconds` warns when a copy's sound and picture start apart
 (Core Media HEVC once gave 3.7 s of sound with no picture); it is reported, not
-repaired: `--accurate` is the fix, or `--edit-list` for a lossless `.mp4`/`.m4v`/`.mov`. A `-c copy` cut on VFR or a
+repaired: `--accurate` is the fix, or the default edit list (not `--no-edit-list`) for a lossless `.mp4`/`.m4v`/`.mov`. A `-c copy` cut on VFR or a
 non-keyframe boundary produces a file that "works" but starts on a frozen or
 wrong frame — respect the automatic re-encode rather than forcing the copy.
 
@@ -74,10 +93,11 @@ wrong frame — respect the automatic re-encode rather than forcing the copy.
 `avg_frame_rate` disagree (phone and screen recordings). Every re-encoding
 script then adds `-fps_mode cfr` at the source's average rate. That flag is a
 whole-file average, and a phone clip at 29.98 against a nominal 30 trips it, so
-`cut.py` re-encodes on it by default and reports packet timestamps sampled in up
-to five windows (`vfr_check`), with a note when they are constant;
-`--vfr-guard sampled` switches to `--accurate` only when they are irregular or too
-few to judge, and `--vfr-guard off` keeps the copy anyway. Pick the rate
+`cut.py` decides on packet timestamps sampled in up to five windows (`vfr_check`)
+instead: by default (`--vfr-guard sampled`, since 3.0.0) it switches to
+`--accurate` only when they are irregular or too few to judge;
+`--vfr-guard average` restores 2.x's re-encode on the flag alone, and
+`--vfr-guard off` keeps the copy anyway. Pick the rate
 explicitly with `fit.py --fps 30|60` when the average is odd (e.g. 23.4 fps from
 dropped frames).
 
@@ -93,6 +113,10 @@ them, not just that the command succeeded, before trusting the cut.
 movement vs. audio) — there is no face or mouth detection anywhere in this skill.
 High confidence means the audio matched well, not that the picture looks right;
 whether lip sync is correct needs a look at the video, not the reported offset.
+
+`multicam.py --switch energy` cuts to the loudest camera, a stand-in for who is
+talking, not speaker identification: it works when each speaker has their own
+camera's mic, and a shared room mic or a loud audience picks the wrong camera.
 
 Don't mix files with different frame rates or sample rates in one
 `cut.py --segments` join without re-encoding (`--accurate`). After `sync.py`,
@@ -301,7 +325,9 @@ the contact sheet (`--sheet`) before treating the picks as final.
 Anything chained by hand through three re-encodes should be one `render.py`
 project instead, so the plan is one file and the user can change one number.
 Re-encodes use x264 `medium`; for long files add `--preset veryfast` to
-intermediates and keep the default for the final export. On Apple Silicon,
+intermediates and keep the default for the final export. `render.py` encodes its intermediates at
+`superfast` by itself since 2.16 (veryfast in 2.15) when its project ends in an encoding export
+(`--intermediate-preset medium` turns it off). On Apple Silicon,
 `--hw` (or `FFMPEG_SKILL_HW=1` for the machine) moves h264/hevc/prores encodes to
 VideoToolbox: 2–7× faster, 1.1–2.9× the bytes at the same quality (1.9–3.5× on HDR). The variable
 leaves `export.py`'s delivery presets on the CPU, which is the usual split (GPU

@@ -6,6 +6,7 @@
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _fixtures import MediaFixtures, OUT, SCRIPTS, TONES, _is_faststart, _no_fontconfig, png_size, script, sh  # noqa: E402
 from _common import default_font_file, font_for_script, probe  # noqa: E402
+import importlib  # noqa: E402
+content_probe = importlib.import_module("_common.probe")  # the module: `_common.probe` is also a function
+import check as check_module  # noqa: E402
 
 
 class AnalysisTests(MediaFixtures):
@@ -34,6 +38,29 @@ class AnalysisTests(MediaFixtures):
         self.assertEqual(field, "1280")
         compact = script("probe.py", self.src, "--compact").stdout
         self.assertIn("1280x720", compact)
+
+    def test_probe_reports_the_start_timecode(self):
+        """probe's `timecode` (nle-bridge's source timecode): the first well-formed `timecode` tag
+        from the video stream, a tmcd data stream, then the container; `drop_frame` is the `;`."""
+        cases = [("tc.mov", "25", "01:00:00:00", False), ("tc.mp4", "25", "01:00:00:00", False),
+                 ("tc_df.mov", "30000/1001", "01:00:00;00", True)]
+        for name, rate, tc, drop in cases:
+            out = OUT / name
+            sh("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=d=1:s=160x90:r={rate}", "-timecode", tc, out)
+            data = json.loads(script("probe.py", out, "--json").stdout)
+            self.assertEqual(data["timecode"]["value"], tc, name)
+            self.assertIs(data["timecode"]["drop_frame"], drop, name)
+            self.assertRegex(data["timecode"]["source"], r"^(stream:\d+|format)$", name)
+        data = json.loads(script("probe.py", self.src, "--json").stdout)
+        self.assertEqual(data["timecode"], {"value": None, "drop_frame": None, "source": None})
+        pick = content_probe.start_timecode
+        tmcd = {"index": 2, "codec_type": "data", "codec_tag_string": "tmcd", "tags": {"timecode": "10:00:00:00"}}
+        self.assertEqual(pick([tmcd], {"tags": {"timecode": "00:00:00:00"}}, {"index": 0}),
+                         {"value": "10:00:00:00", "drop_frame": False, "source": "stream:2"})
+        self.assertEqual(pick([], {"tags": {"TIMECODE": "01:00:00.00"}}, {"index": 0, "tags": {"timecode": "not a tc"}}),
+                         {"value": "01:00:00.00", "drop_frame": True, "source": "format"}, "a malformed tag is skipped")
+        self.assertEqual(pick([], {"tags": {"timecode": "02:00:00:00"}}, {"index": 0, "tags": {"timecode": "01:99:99:00"}})["source"],
+                         "format", "minutes and seconds above 59 are not a timecode")
 
     def test_probe_accepts_common_flags(self):
         out = script("probe.py", self.src, "--json", "--field", "duration").stdout.strip()
@@ -302,13 +329,241 @@ class AnalysisTests(MediaFixtures):
                "-f", "lavfi", "-i", tone + ",volume=enable='gte(t,2)':volume=0", "-t", "6",
                "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac", mixed)
         r = self._rows(normal, "--content")
-        self.assertEqual([r[k]["status"] for k in ("black", "frozen", "silence")], ["PASS"] * 3, r)
+        self.assertEqual([r[k]["status"] for k in ("black", "frozen", "silence", "dropouts", "first frame", "flashes")],
+                         ["PASS"] * 6, r)
         self.assertEqual(self._rows(black, "--content")["black"]["status"], "FAIL")
         self.assertEqual(self._rows(frozen, "--content")["frozen"]["status"], "FAIL")
         self.assertEqual(self._rows(part, "--content")["frozen"]["status"], "WARN")
         self.assertEqual(self._rows(silent, "--content")["silence"]["status"], "FAIL")
         r = self._rows(mixed, "--content")
         self.assertEqual((r["black"]["status"], r["silence"]["status"]), ("WARN", "WARN"), r)
+
+    def test_check_content_flashes_and_first_frame_rows(self):
+        """2.23: one frame unlike both neighbours (which match each other) is a flashes WARN with its
+        time; a hard cut, a cut away and back after several frames, and moving footage are not. A
+        first frame of one flat colour (a black lead-in) is a first-frame WARN. Fast motion, where every
+        frame jumps as far as a flash does, is not a flash because its frames never return. Neither row FAILs:
+        a strobe or a fade from black can be the edit."""
+        tone = "sine=frequency=440:sample_rate=48000"
+        moving = "testsrc2=size=160x90:rate=10"
+        flash = self._content_clip("content_flash.mp4", moving + ",drawbox=t=fill:color=white:enable='eq(n,15)'", tone)
+        away = self._content_clip("content_cut_away.mp4", moving + ",drawbox=t=fill:color=red:enable='between(n,15,18)'", tone)
+        cut = self._content_clip("content_hard_cut.mp4", moving + ",drawbox=t=fill:color=navy:enable='gte(n,30)'", tone)
+        lead = self._content_clip("content_black_lead.mp4", moving + ",drawbox=t=fill:color=black:enable='lt(n,3)'", tone)
+        # every frame jumps as far as a flash does, but never comes back: the neighbour rule keeps it out
+        whip = self._content_clip("content_whip.mp4", moving + ",scroll=horizontal=0.13", tone)
+        r = self._rows(flash, "--content")
+        self.assertEqual(r["flashes"]["status"], "WARN", r["flashes"])
+        self.assertTrue(r["flashes"]["value"].startswith("1: 1.50s"), r["flashes"])
+        self.assertIn("join", r["flashes"]["fix"])
+        self.assertEqual((r["flashes"]["kind"], r["first frame"]["kind"]), ("judgement", "judgement"))
+        for clip in (away, cut, lead, whip):
+            self.assertEqual(self._rows(clip, "--content")["flashes"]["status"], "PASS", clip)
+        # a timestamp gap right after the flash: the rawvideo muxer's constant-rate padding repeated
+        # records there, which hid this flash and reported two false ones 9 frames later
+        gap = OUT / "content_flash_gap.mkv"
+        if not gap.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+               moving + ":duration=6,drawbox=t=fill:color=white:enable='eq(n,20)',setpts='if(gt(N,20),PTS+1/TB,PTS)'",
+               "-fps_mode", "passthrough", "-c:v", "libx264", "-pix_fmt", "yuv420p", gap)
+        r = self._rows(gap, "--content")
+        self.assertTrue(r["flashes"]["value"].startswith("1: "), r["flashes"])
+        self.assertEqual(content_probe.detect_flashes(str(gap)), [20])
+        # the gap comes before this flash: its row time is its own presentation time (4.0 s), not 30 / 10 fps
+        late = OUT / "content_flash_after_gap.mkv"
+        if not late.exists():
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+               moving + ":duration=6,drawbox=t=fill:color=white:enable='eq(n,30)',setpts='if(gt(N,20),PTS+1/TB,PTS)'",
+               "-fps_mode", "passthrough", "-c:v", "libx264", "-pix_fmt", "yuv420p", late)
+        self.assertEqual(self._rows(late, "--content")["flashes"]["value"], "1: 4.00s")
+        r = self._rows(lead, "--content")
+        self.assertEqual(r["first frame"]["status"], "WARN", r["first frame"])
+        self.assertEqual(self._rows(cut, "--content")["first frame"]["status"], "PASS")
+        self.assertNotIn("flashes", self._rows(flash))  # opt-in: the default row set is unchanged
+
+    def test_check_flash_times_on_the_look_timeline(self):
+        """The flashes row's times: a flash frame's own presentation time from the container start
+        when it is known, else index / rate plus the video's lead marked "~", else `frame N`."""
+        meta = {"start_time": 0.5}
+        pts = [0.5 + i / 10 for i in range(20)] + [4.0 + i / 10 for i in range(20)]  # a 1.5 s gap after frame 19
+        self.assertEqual(check_module.flash_times([5, 25], {"fps": 10.0}, meta, pts), "0.50s, 4.00s")
+        self.assertEqual(check_module.flash_times([15], {"fps": 30.0, "start_time": 0.7}, meta), "~0.70s")
+        self.assertEqual(check_module.flash_times([15, 16], {"fps": None}, meta), "frame 15, frame 16")
+        self.assertTrue(check_module.flash_times(list(range(7)), {"fps": 10.0}, meta, pts).endswith(" ..."))
+
+    def test_check_flash_pass_failure_is_unmeasured(self):
+        """A flash pass that fails is None (a WARN 'could not measure' row in check.py), never []
+        (which would read as PASS)."""
+        from unittest import mock
+        failed = subprocess.CompletedProcess([], 1, b"", b"Error while decoding stream")
+        clip = self._content_clip("content_normal.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000")
+        with mock.patch.object(content_probe, "run_analysis", lambda *a, **k: failed):
+            self.assertIsNone(content_probe.detect_flashes(str(clip)))
+
+    def test_presentation_times_refuse_a_packet_without_pts(self):
+        """One unreadable pts makes the whole list [] (the flashes row falls back to its "~" time)
+        rather than skipping that packet and shifting every later time onto the wrong frame."""
+        from unittest import mock
+        def fake(stdout):
+            return lambda *a, **k: subprocess.CompletedProcess([], 0, stdout, "")
+        with mock.patch.object(content_probe, "run", fake("0.2\n0.0\n0.1\n")):
+            self.assertEqual(content_probe.presentation_times("in.mp4", 0.0), [0.0, 0.1, 0.2])
+        with mock.patch.object(content_probe, "run", fake("0.0\nN/A\n0.2\n")):
+            self.assertEqual(content_probe.presentation_times("in.mp4", 0.0), [])
+
+    def test_content_passes_skip_cover_art(self):
+        """Every --content decode selects V:0 (attached pictures excluded, as probe does), so cover
+        art ahead of the playable video is never what the black, frozen, flash or first-frame rows
+        measure."""
+        from unittest import mock
+        seen = []
+        def fake(cmd, *a, **k):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 1, b"", b"")
+        with mock.patch.object(content_probe, "run_analysis", fake), \
+                mock.patch.object(content_probe, "die", side_effect=RuntimeError):
+            with self.assertRaises(RuntimeError):
+                content_probe.detect_content("in.mp4", 3.0, audio=False)
+            content_probe.detect_flashes("in.mp4")
+            content_probe.first_frame_stats("in.mp4")
+        self.assertEqual(len(seen), 3, seen)
+        for cmd in seen:
+            joined = " ".join(map(str, cmd))
+            self.assertIn("0:V:0", joined, cmd)
+            self.assertNotIn("0:v:0", joined, cmd)
+    def test_check_expect_identity_ties_the_check_to_one_write(self):
+        """2.24: a writing tool reports output_identity; check.py --expect-identity FAILs on any other
+        file at that path (here: the same path rewritten by a second run), and reports input_identity."""
+        src = self._content_clip("identity_src.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000", 2)
+        out = OUT / "identity_out.mp4"
+        first = json.loads(subprocess.run([sys.executable, str(SCRIPTS / "cut.py"), str(src), "--end", "1", "-o", str(out),
+                                           "--overwrite", "--json"], stdout=subprocess.PIPE, text=True).stdout)
+        ident = first["output_identity"]
+        self.assertEqual(ident["size"], out.stat().st_size)
+        expect = f"{ident['size']}:{ident['mtime_ns']}"
+        self.assertEqual(self._rows(out, "--no-loudness", "--expect-identity", expect)["identity"]["status"], "PASS")
+        subprocess.run([sys.executable, str(SCRIPTS / "cut.py"), str(src), "--end", "1.5", "-o", str(out), "--overwrite"],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        proc = subprocess.run([sys.executable, str(SCRIPTS / "check.py"), str(out), "--platform", "custom", "--no-loudness",
+                               "--expect-identity", expect, "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        doc = json.loads(proc.stdout)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual({r["check"]: r["status"] for r in doc["checks"]}["identity"], "FAIL")
+        self.assertEqual(doc["input_identity"]["size"], out.stat().st_size)
+        # a file replaced while it was being measured fails, even when the second read matches
+        import contextlib, io
+        from unittest import mock
+        first = {"size": 1, "mtime_ns": 1}
+        now = {"size": out.stat().st_size, "mtime_ns": out.stat().st_mtime_ns}
+        argv = ["check.py", str(out), "--platform", "custom", "--no-loudness", "--expect-identity",
+                f"{now['size']}:{now['mtime_ns']}", "--json"]
+        buf = io.StringIO()
+        with mock.patch.object(check_module, "file_identity", side_effect=[first, now]), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(buf), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                check_module.main()
+        row = {r["check"]: r for r in json.loads(buf.getvalue())["checks"]}["identity"]
+        self.assertEqual((row["status"], row["reason"]), ("FAIL", "the file changed while it was being checked"), row)
+        # without --expect-identity there is no identity row, but the change is still a note
+        buf = io.StringIO()
+        with mock.patch.object(check_module, "file_identity", side_effect=[first, now]), \
+                mock.patch.object(sys, "argv", argv[:4] + ["--json"]), contextlib.redirect_stdout(buf), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                check_module.main()
+            except SystemExit:
+                pass
+        doc = json.loads(buf.getvalue())
+        self.assertNotIn("identity", {r["check"] for r in doc["checks"]})
+        self.assertTrue(any("changed while it was being checked" in n for n in doc.get("notes", [])), doc.get("notes"))
+        # a dry run reads the file that exists, so the identity row is there under --dry-run too
+        self.assertEqual(self._rows(out, "--no-loudness", "--expect-identity", expect, "--dry-run")["identity"]["status"], "FAIL")
+
+    def test_check_compare_measures_against_a_reference(self):
+        """2.24: --compare REF: identical frames PASS as identical, a heavily compressed copy WARNs
+        under a mean SSIM of 0.98 with its worst frame, another frame size is not compared."""
+        ref = self._content_clip("compare_ref.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000", 3)
+        poor, small = OUT / "compare_poor.mp4", OUT / "compare_small.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", ref, "-c:v", "libx264", "-crf", "45", "-c:a", "copy", poor)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", ref, "-vf", "scale=80:46", "-c:v", "libx264", "-c:a", "copy", small)
+        same = self._rows(ref, "--no-loudness", "--compare", ref)["similarity"]
+        self.assertEqual(same["status"], "PASS")
+        self.assertIn("identical", same["value"])
+        low = self._rows(poor, "--no-loudness", "--compare", ref)["similarity"]
+        self.assertEqual(low["status"], "WARN", low)
+        self.assertIn("worst", low["value"])
+        self.assertIn("not compared", self._rows(small, "--no-loudness", "--compare", ref)["similarity"]["value"])
+
+    def test_check_compare_times_the_worst_frame_and_counts_frames(self):
+        """2.24: --compare names the worst frame by its presentation time (one damaged frame at
+        2.5 s), counts frames from the packets when the container states no nb_frames (an .mkv two
+        frames short of the reference), prints that note in plain text too, and keeps the row under
+        --dry-run when both files exist."""
+        ref = self._content_clip("compare_ref.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000", 3)
+        hit = OUT / "compare_one_bad_frame.mkv"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", ref, "-t", "2.8",
+           "-vf", "drawbox=t=fill:color=white:enable='eq(n,25)'", "-c:v", "libx264", "-crf", "12", "-an", hit)
+        row = self._rows(hit, "--no-loudness", "--compare", ref)["similarity"]
+        self.assertIn("at 2.50s", row["value"], row)
+        proc = subprocess.run([sys.executable, str(SCRIPTS / "check.py"), str(hit), "--platform", "custom", "--no-loudness",
+                               "--compare", str(ref)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertIn("note: --compare: 28 frames against the reference's 30", proc.stdout + proc.stderr)
+        self.assertIn("similarity", self._rows(hit, "--no-loudness", "--compare", ref, "--dry-run"))
+
+    def test_check_compare_pairs_only_existing_frames_and_is_order_and_rotation_safe(self):
+        """2.24.1: a shorter output was paired with its last frame repeated (mean below 0.9 for 52
+        identical frames, worst frame timed past the file's end); an RGB file gave "could not
+        measure" (SSIM R:/PSNR r: lines) or another value by argument order; a phone clip stored
+        sideways was compared by its stored size, so equal pictures were "not compared"."""
+        ref = self._content_clip("compare_ref.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000", 3)
+        short, rgb, side, upright = (OUT / n for n in ("compare_short.mp4", "compare_rgb.mkv", "compare_side.mp4", "compare_upright.mp4"))
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", ref, "-t", "1.5", "-c", "copy", short)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", ref, "-c:v", "libx264rgb", "-crf", "0", "-an", rgb)
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-display_rotation", "90", "-i", ref, "-c", "copy", side)
+        self.assertIn(abs(int(probe(str(side))["video"].get("rotation") or 0)), (90, 270))
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", side, "-c:v", "libx264", "-crf", "0", "-an", upright)
+        row = self._rows(short, "--no-loudness", "--compare", ref)["similarity"]
+        self.assertEqual(row["status"], "PASS", row)
+        self.assertIn("identical", row["value"])
+        self.assertNotIn(" 30 frames", row["value"])
+        there, back = (self._rows(a, "--no-loudness", "--compare", b)["similarity"] for a, b in ((rgb, ref), (ref, rgb)))
+        self.assertNotIn("could not measure", there["value"])
+        self.assertEqual(there["value"].split(" (")[0], back["value"].split(" (")[0])
+        self.assertNotIn("not compared", self._rows(upright, "--no-loudness", "--compare", side)["similarity"]["value"])
+
+    def test_check_expect_identity_empty_is_malformed_not_absent(self):
+        """2.24.1: --expect-identity "" (an unset shell variable) skipped the identity row and passed."""
+        ref = self._content_clip("compare_ref.mp4", "testsrc2=size=160x90:rate=10", "sine=frequency=440:sample_rate=48000", 3)
+        proc = script("check.py", ref, "--no-loudness", "--expect-identity", "", "--json", expect_fail=True)
+        self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+
+    def test_check_content_dropouts_row(self):
+        """2.17: a short run of digital silence with sound on both sides (lost audio at a join) is a
+        dropouts WARN; the same gap holding -60 dB room tone is a recording's pause and PASSes, and
+        a silent lead-in or tail is not a dropout, also when the audio ends before the video. The
+        silence row (share below -50 dB) misses all three: 0.2 s of 6 s is 3%."""
+        def clip(name, audio_graph):
+            path = OUT / name
+            if not path.exists():
+                sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:r=10:d=6",
+                   "-f", "lavfi", "-i", "sine=f=440:d=6", "-f", "lavfi", "-i", "anoisesrc=a=0.001:d=6",
+                   "-filter_complex", audio_graph, "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-t", "6", path)
+            return path
+        gap = "volume='if(between(t,2,2.2),0,1)':eval=frame"
+        dropped = clip("dropout_gap.mp4", f"[1]{gap}[a]")
+        room = clip("dropout_roomtone.mp4", f"[1]{gap}[t];[t][2]amix=inputs=2:normalize=0[a]")
+        edges = clip("dropout_edges.mp4", "[1]volume='if(lt(t,0.5)+gt(t,5.5),0,1)':eval=frame[a]")
+        # audio 2 s shorter than the video, its last 0.2 s silent: silencedetect closes that tail at
+        # the audio's EOF, well inside the container's 6 s, so only the padded pass keeps it a tail
+        short = clip("dropout_short_audio.mp4", "[1]atrim=0:4,volume='if(gt(t,3.8),0,1)':eval=frame[a]")
+        r = self._rows(dropped, "--content")
+        self.assertEqual((r["silence"]["status"], r["dropouts"]["status"]), ("PASS", "WARN"), r)
+        self.assertTrue(r["dropouts"]["value"].startswith("1: 2."), r["dropouts"])
+        self.assertIn("join", r["dropouts"]["fix"])
+        self.assertEqual(self._rows(room, "--content")["dropouts"]["status"], "PASS")
+        self.assertEqual(self._rows(edges, "--content")["dropouts"]["status"], "PASS")
+        self.assertEqual(self._rows(short, "--content")["dropouts"]["status"], "PASS")
 
     def test_check_colour_row_reads_the_matrix_tag(self):
         """#325: the colour row decided "untagged" from primaries and transfer only, so a file whose
@@ -531,11 +786,14 @@ class AnalysisTests(MediaFixtures):
         proc = script("verify.py", folder, "--seconds", "2", "--keep", "--out", out, "--report", report, expect_fail=True)
         text = report.read_text(encoding="utf-8")
         self.assertIn(text.strip(), proc.stdout.strip(), "without --json the report is printed to stdout")
-        self.assertIn("| probe | FAIL | 0s | ffprobe failed |", text)
+        # the probe row carries probe's own message (nothing happens silently, part 2), not a fixed "ffprobe failed"
+        probe_row = re.search(r"^\| probe \| FAIL \| 0s \| (ffprobe failed on .*broken\.mp4.*) \|$", text, re.M)
+        self.assertTrue(probe_row, text)
+        self.assertIn("| * | SKIP |", text)
         for step in ("overlay text", "look sheet", "probe analyze", "loudness measure", "silence list",
                      "color to-sdr", "hdr preserved", "audio downmix", "export x"):
             self.assertIn(f"| {step} | PASS |", text, f"{step} missing or failed:\n{text}")
-        self.assertNotIn("| FAIL |", text.replace("| probe | FAIL | 0s | ffprobe failed |", ""))
+        self.assertNotIn("| FAIL |", text.replace(probe_row.group(0), ""))
         self.assertTrue((out / f"{Path(self.hdr).stem}_sdr.mp4").exists())
         self.assertTrue((out / f"{Path(self.surround).stem}_st.mp4").exists())
         # a per-step timeout is reported per step, never raised
@@ -544,6 +802,9 @@ class AnalysisTests(MediaFixtures):
         timed_out = [s for f in data["files"] for s in f["steps"] if s["error"].startswith("timeout after")]
         self.assertTrue(timed_out, data)
         self.assertEqual(data["failed"], len(timed_out))
+        # 0 means no limit here as on every other tool; it timed every step out at 0 s before 2.17.4
+        data = json.loads(script("verify.py", self.src, "--quick", "--timeout", "0", "--json").stdout)
+        self.assertEqual((data["status"], data["failed"]), ("completed", 0), data)
 
     def test_check_compliance(self):
         reels = OUT / "export_reels.mp4"

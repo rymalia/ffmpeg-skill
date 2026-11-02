@@ -35,11 +35,15 @@ fail refuses it with the other input problems; skip drops it into `skipped`. A c
 audio stream is never silent.
 """
 import argparse
+import json
 import os
+import tempfile
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from _common import STATE, AUDIO_MEDIA_EXT, draws_chroma, drawn_chain, label_chain, matrix_chain, video_args, aac_args, add_common, apply_common, audio_codec_for, default_output, die, dry_run_input_pending, emit, ffmpeg_base, info, measured_level_dbfs, is_audio_output, probe, require_tool, run, validate_color, X264_PRESETS, fmt_secs
+from _common.probe import SILENT_PEAK_DBFS, signatures_match, stream_signature
+from _common import STATE, AUDIO_MEDIA_EXT, concat_list_line, guard_sidecar, place_output, refuse, sibling_temp, draws_chroma, drawn_chain, label_chain, matrix_chain, video_args, aac_args, add_common, apply_common, audio_codec_for, default_output, die, dry_run_input_pending, emit, ffmpeg_base, info, measured_level_dbfs, is_audio_output, probe, require_tool, run, validate_color, X264_PRESETS, fmt_secs
+from _common.emit import warn
 
 TRANSITIONS = ["fade", "dissolve", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright",
                "circleopen", "circleclose", "fadeblack", "fadewhite", "smoothleft", "smoothright", "radial", "none"]
@@ -49,6 +53,9 @@ STATE_SKIPPED: List[Dict[str, Any]] = []
 # --dry-run: inputs that do not exist yet, planned on as an earlier step's output
 STATE_PENDING: List[Dict[str, Any]] = []
 STATE_NOTES: List[str] = []
+# the joined picture's length against the clips' sum less the transitions: 1.5 frames, at least 0.05 s
+DURATION_TOLERANCE_FRAMES = 1.5
+DURATION_TOLERANCE_MIN = 0.05
 # --on-silent warn: inputs whose audio peak is at or below --silence-threshold, joined anyway
 STATE_SILENT: List[Dict[str, Any]] = []
 # warnings, never refusals: a clip shorter than MIN_SEGMENT_FRAMES frames (audio-only: shorter than
@@ -78,6 +85,20 @@ def unpending_length(durs: List[float], d: float) -> Optional[float]:
     if STATE_PENDING:
         return None
     return round(sum(durs) - d * (len(durs) - 1), 3)
+
+
+def overlap_report(durs: List[float], expected: Optional[float]) -> Dict[str, Any]:
+    """The clips' own total next to the joined length (2.20). The joined length is derived from
+    the transition the join itself applied, so a check against it alone cannot show that a fade
+    took time out of the material; the sum of the inputs is the yardstick the user holds."""
+    if expected is None or STATE_PENDING:
+        return {}
+    total = round(sum(durs), 3)
+    out: Dict[str, Any] = {"inputs_duration": total, "transition_shortening": round(total - expected, 3)}
+    if out["transition_shortening"] > 0.0005:
+        STATE_NOTES.append(f"the transitions overlap the clips: {fmt_secs(total)} of clips play as {fmt_secs(expected)} "
+                           f"({out['transition_shortening']:.3f} s shorter)")
+    return out
 
 
 def clip_length(meta: Dict[str, Any], fps: float) -> float:
@@ -113,7 +134,7 @@ def note_short_segments(paths: List[str], metas: List[dict], minimum: float, uni
         STATE_SHORT.append({"index": k, "path": p, "duration": round(dur, 4)})
     if STATE_SHORT:
         listing = ", ".join(f"#{s['index'] + 1} {s['path']} ({s['duration']:g}s)" for s in STATE_SHORT)
-        info(f"warning: {len(STATE_SHORT)} input(s) shorter than {unit}: {listing}")
+        warn(f"{len(STATE_SHORT)} input(s) shorter than {unit}: {listing}", "short_inputs", count=len(STATE_SHORT))
         STATE_NOTES.append(f"{len(STATE_SHORT)} input(s) are shorter than {unit} and were joined anyway: {listing}")
 
 
@@ -174,8 +195,9 @@ def join_audio(args: argparse.Namespace, metas: List[dict]) -> int:
             die(f"{output} is {a.get('sample_rate')} Hz {a.get('channels')} ch, expected {rate} Hz {channels} ch")
     info(f"wrote {output} ({fmt_secs(r['duration'])}, {expected_text(expected)}, audio {a.get('codec')} {channels}ch {rate}Hz, {n} clips, "
          + ("crossfade" if d else "butt join") + ")")
-    emit(output, mode="audio", **reported(), clips=n, transition=args.transition if d else "none", expected_duration=expected,
-         sample_rate=rate, channels=channels, video=False)
+    overlap = overlap_report(durs, expected)
+    emit(output, mode="audio", **overlap, **reported(), clips=n, transition=args.transition if d else "none", expected_duration=expected,
+         sample_rate=rate, channels=channels, video=False, expect_streams={"audio": 1})
     return 0
 
 
@@ -285,6 +307,204 @@ def parse_allow_silent(value: Optional[str], n: int) -> List[int]:
     return out
 
 
+# join.py --copy (2.24). The concat demuxer starts each clip where the previous one's container
+# ends, so a stream that ends early leaves a gap at the join: a held frame for the picture, a hole
+# for the sound. A clip whose picture and sound end further apart than this is refused.
+COPY_AV_GAP = 0.05
+COPY_PREROLL_PACKETS = 300   # packets read per clip to find an edit list's hidden pre-roll
+
+
+def _copy_doc(path: str) -> "Optional[Dict[str, Any]]":
+    """ffprobe's first video and first audio stream of `path`, with extradata hashes, as the doc
+    stream_signature() reads; None when it cannot be read."""
+    proc = run([require_tool("ffprobe"), "-v", "error", "-show_data_hash", "sha256", "-show_streams", "-show_format",
+                "-of", "json", path], quiet=True, check=False)
+    try:
+        doc = json.loads(proc.stdout or "") if proc.returncode == 0 else None
+    except ValueError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    # attached pictures (cover art) are not the picture being joined, as V:0 skips them
+    every = doc.get("streams") or []
+    streams = [st for st in every if not (st.get("disposition") or {}).get("attached_pic")]
+    keep = [next((st for st in streams if st.get("codec_type") == kind), None) for kind in ("video", "audio")]
+    doc["streams"] = [st for st in keep if st]
+    # the concat demuxer maps every clip's packets by stream index, laid out as the first clip's
+    doc["layout"] = {"streams": len(every), "indices": [st.get("index") for st in doc["streams"]]}
+    return doc
+
+
+def _video_packets(path: str, limit: "Optional[int]" = None) -> "List[str]":
+    """The flags of the first video stream's packets (all of them, or the first `limit`); cover art
+    is not that stream."""
+    cmd = [require_tool("ffprobe"), "-v", "error", "-select_streams", "V:0", "-show_entries", "packet=flags", "-of", "csv=p=0"]
+    if limit:
+        cmd += ["-read_intervals", f"%+#{limit}"]
+    proc = run(cmd + [path], quiet=True, check=False)
+    return (proc.stdout or "").split() if proc.returncode == 0 else []
+
+
+SPAN_HEAD_PACKETS = 64     # enough to see the earliest presentation time past B-frame reordering
+SPAN_TAIL_SECONDS = 10.0   # read from this far before the end, so a seek that lands early still reaches it
+
+
+def _stream_span(path: str, kind: str, duration: float = 0.0, start: float = 0.0) -> "Optional[Tuple[float, float]]":
+    """First packet's time and last packet's time plus its duration for the first `kind` stream
+    (V or a): measured, because Matroska/WebM state no stream length and MPEG-TS only an estimate.
+    None when the packets cannot be read or one has no time: a partial span would invent a gap."""
+    # JSON, not csv: older ffprobe builds (5.1) print side-data rows between the packet rows in csv.
+    # A long clip is read at its head and its tail only: every packet of a two-hour file is
+    # hundreds of thousands of entries for two numbers
+    cmd = [require_tool("ffprobe"), "-v", "error", "-select_streams", f"{kind}:0", "-show_entries",
+           "packet=pts_time,dts_time,duration_time", "-of", "json"]
+    if duration > 3 * SPAN_TAIL_SECONDS:
+        # read_intervals takes timestamps, so the tail starts from the file's own start time
+        # (an MPEG-TS clock can start hours in; an edit list can start it below zero)
+        cmd += ["-read_intervals", f"%+#{SPAN_HEAD_PACKETS},{start + duration - SPAN_TAIL_SECONDS:.3f}%"]
+    proc = run(cmd + [path], quiet=True, check=False)
+    try:
+        packets = json.loads(proc.stdout or "{}").get("packets") or [] if proc.returncode == 0 else []
+    except ValueError:
+        return None
+    times = []
+    for pkt in packets:
+        try:
+            # a packet ffprobe gives no pts (some muxers leave it on B-frames) still has its dts
+            t = float(pkt.get("pts_time", pkt.get("dts_time")))
+        except (TypeError, ValueError):
+            return None
+        try:
+            d = float(pkt.get("duration_time") or 0.0)
+        except (TypeError, ValueError):
+            d = 0.0
+        times.append((t, t + d))
+    if not times:
+        return None
+    return min(t for t, _ in times), max(e for _, e in times)
+
+
+def join_copy(args, metas: List[Dict[str, Any]]) -> int:
+    """--copy: the concat demuxer with -c copy, after checking that the clips can be joined that
+    way, and measured afterwards (video packet count and length against the clips')."""
+    if args.transition != "none":
+        die("--copy joins without a transition: pass --transition none (a transition re-encodes the frames it blends)")
+    if args.width or args.height or args.fps:
+        die("--copy keeps every clip's own frame and rate: --width, --height and --fps need a re-encode, so drop --copy")
+    if args.sample_rate or args.channels:
+        die("--copy keeps every clip's own sound: --sample-rate and --channels need a re-encode, so drop --copy")
+    encoder = [f for f, on in (("--codec", STATE.codec), ("--hw", STATE.hw and STATE.hw_source == "flag"),
+                               ("--quality", getattr(args, "quality_given", False)))
+               if on]
+    if encoder:
+        die(f"--copy keeps every clip's own encoding: {', '.join(encoder)} choose(s) an encode, so drop --copy")
+    output = args.output or default_output(args.inputs[0], "joined", os.path.splitext(args.inputs[0])[1].lstrip(".") or "mp4")
+    guard_sidecar(output, *args.inputs)
+    ext = os.path.splitext(output)[1].lower()
+    n = len(args.inputs)
+    pending = any(m.get("dry_run") for m in metas)
+    if pending:
+        STATE_NOTES.append("--copy: an input does not exist yet, so whether the clips match is checked when a real run has them")
+    else:
+        docs = [_copy_doc(p) for p in args.inputs]
+        unreadable = [p for p, d in zip(args.inputs, docs) if d is None]
+        if unreadable:
+            die(f"--copy: could not read the streams of {', '.join(unreadable)}")
+        moved = [{"index": i, "path": p, "differs": {"stream_layout": [docs[0]["layout"], d["layout"]]}}
+                 for i, (p, d) in enumerate(zip(args.inputs, docs)) if i and d["layout"] != docs[0]["layout"]]
+        if moved:
+            refuse("input", "join_copy_mismatch",
+                   f"--copy: {', '.join(m['path'] for m in moved)} lay(s) out their streams differently from "
+                   f"{args.inputs[0]} (count or order, cover art included); the concat demuxer maps streams by position",
+                   hint="drop --copy to re-encode them to one layout", clips=moved)
+        sigs = [stream_signature(d) for d in docs]
+        mismatched = [{"index": i, "path": p, "differs": {k: [a.get(k), b.get(k)] for a, b in zip(sigs[0], sig)
+                                                           for k in a if k != "extradata_hash" and a.get(k) != b.get(k)}
+                       if len(sig) == len(sigs[0]) else {"streams": [len(sigs[0]), len(sig)]}}
+                      for i, (p, sig) in enumerate(zip(args.inputs, sigs)) if i and not signatures_match([sigs[0], sig], ext)]
+        if mismatched:
+            listing = "; ".join(f"#{m['index'] + 1} {m['path']}: " + (", ".join(f"{k} {v[1]} (not {v[0]})" for k, v in m["differs"].items())
+                                                                        or "codec configuration (extradata) differs")
+                                for m in mismatched)
+            refuse("input", "join_copy_mismatch", f"--copy: {len(mismatched)} clip(s) do not match the first one: {listing}",
+                   hint="drop --copy to re-encode them to one format", clips=mismatched)
+        hidden = [p for p in args.inputs if "D" in "".join(_video_packets(p, COPY_PREROLL_PACKETS))]
+        if hidden:
+            refuse("input", "join_copy_mismatch",
+                   f"--copy: {', '.join(hidden)} hide(s) frames before their start (an edit list), which a copy join would show",
+                   hint="drop --copy, or re-cut those clips with cut.py --accurate", clips=[{"path": p, "differs": {"edit_list": True}} for p in hidden])
+        gaps = []
+        for p, m in zip(args.inputs, metas):
+            # each stream's span from its packets: Matroska/WebM state no stream length and an
+            # MPEG-TS stream length is an estimate, so a stated duration missed or invented gaps
+            if not (m.get("video") and m.get("audio")):
+                continue
+            length, origin = float(m.get("duration") or 0.0), float(m.get("start_time") or 0.0)
+            v_span, a_span = _stream_span(p, "V", length, origin), _stream_span(p, "a", length, origin)
+            if v_span is None or a_span is None:
+                refuse("input", "join_copy_mismatch",
+                       f"--copy: could not measure where picture and sound start and end in {p} (a packet without a "
+                       "time), so a gap at the join could not be ruled out", hint="drop --copy to re-encode the join",
+                       clips=[{"path": p, "differs": {"av_span": "unmeasured"}}])
+            (vb, ve), (ab, ae) = v_span, a_span
+            if abs(vb - ab) > COPY_AV_GAP or abs(ve - ae) > COPY_AV_GAP:
+                gaps.append({"path": p, "video": [round(vb, 3), None if ve is None else round(ve, 3)],
+                             "audio": [round(ab, 3), None if ae is None else round(ae, 3)]})
+        if gaps:
+            def span(x):
+                return f"{x[0]:.3f}-" + ("?" if x[1] is None else f"{x[1]:.3f}") + "s"
+            listing = "; ".join(f"{g['path']} (video {span(g['video'])}, audio {span(g['audio'])})" for g in gaps)
+            refuse("input", "join_copy_mismatch",
+                   f"--copy: picture and sound start or end more than {COPY_AV_GAP * 1000:.0f} ms apart in {listing}; a copy join "
+                   "would leave that gap at the next clip", hint="drop --copy, which trims both streams to one length",
+                   clips=[{"path": g["path"], "differs": {"video_span": g["video"], "audio_span": g["audio"]}} for g in gaps])
+    fps = (metas[0].get("video") or {}).get("fps") or 30.0
+    note_short_segments(args.inputs, metas, MIN_SEGMENT_FRAMES / fps, f"{MIN_SEGMENT_FRAMES} frames at {fps:g} fps")
+    place_silent([m.get("duration") or 0.0 for m in metas], 0.0)
+    with tempfile.TemporaryDirectory(prefix="ffskill_join_") as tmp:
+        listfile = os.path.join(tmp, "list.txt")
+        with open(listfile, "w", encoding="utf-8") as fh:
+            for p in args.inputs:
+                fh.write(concat_list_line(os.path.abspath(p)) + "\n")
+        joined = sibling_temp(output, "join") if not STATE.dry_run else output
+        cmd = ffmpeg_base() + ["-f", "concat", "-safe", "0", "-i", listfile, "-map", "0:V:0", "-map", "0:a:0?", "-c", "copy"]
+        if ext in (".mp4", ".mov", ".m4v"):
+            cmd += ["-movflags", "+faststart"]
+        try:
+            run(cmd + [joined])
+            verification: List[Dict[str, Any]] = []
+            if not STATE.dry_run:
+                want = sum(len(_video_packets(p)) for p in args.inputs)
+                got = len(_video_packets(joined))
+                # nothing counted on either side is a failed read, not a match
+                verification.append({"step": "join", "property": "video_packets", "ok": got == want and want > 0,
+                                     "measured": got, "expected": want, "provenance": "input_premeasurement"})
+                r = probe(joined, role="output")
+                measured = (r.get("video") or {}).get("duration") or r.get("duration")
+                expected = round(sum(m.get("duration") or 0.0 for m in metas), 3)
+                tol = round(n * COPY_AV_GAP + 1.0 / fps, 3)
+                verification.append({"step": "join", "property": "video_duration",
+                                     "ok": measured is not None and abs(measured - expected) <= tol,
+                                     "measured": None if measured is None else round(measured, 3), "expected": expected,
+                                     "tolerance": tol, "provenance": "input_premeasurement"})
+                bad = [v for v in verification if not v["ok"]]
+                if bad:
+                    die("--copy: the joined file does not hold the clips it was given: "
+                        + "; ".join(f"{v['property']} {v['measured']} (expected {v['expected']})" for v in bad),
+                        kind="verification", hint="drop --copy to re-encode the join", verification=verification)
+                place_output(joined, output, move=True)
+        finally:
+            if joined != output and os.path.exists(joined):
+                os.remove(joined)
+    r = probe(output, role="output")
+    info(f"wrote {output} ({fmt_secs(r.get('duration'))}, {n} clips, stream copy)")
+    emit(output, mode="copy", **reported(), clips=n, transition="none", reencoded=False,
+         verification=verification, expect_streams={"video": 1, "audio": 1 if all(m.get("audio") for m in metas) else 0},
+         stream_reference=metas,
+         dropped_non_av_streams=any(m.get("subtitle_streams") or m.get("data_streams") for m in metas))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="*", help="two or more clips in order (or --list FILE)")
@@ -300,7 +520,7 @@ def main() -> int:
     ap.add_argument("--allow-silent", metavar="N[,N...]",
                     help="input numbers (1-based) whose silence is intended, e.g. a planned pause: always joined, "
                          "listed under `silent` with intended: true, no warning, whatever --on-silent says")
-    ap.add_argument("--silence-threshold", type=float, default=-50.0, metavar="DB",
+    ap.add_argument("--silence-threshold", type=float, default=SILENT_PEAK_DBFS, metavar="DB",
                     help="peak level in dBFS at or below which an input counts as silent (default -50)")
     ap.add_argument("-o", "--output", help="output file (default: <first>_joined.mp4)")
     ap.add_argument("--transition", choices=TRANSITIONS, default="fade", help="transition between clips (default fade)")
@@ -309,6 +529,10 @@ def main() -> int:
     ap.add_argument("--height", type=int, help="output height (default: first clip)")
     ap.add_argument("--fps", type=float, help="output frame rate (default: first clip)")
     ap.add_argument("--fit", choices=["pad", "crop"], default="pad", help="how clips of another aspect reach the frame (default pad)")
+    ap.add_argument("--copy", action="store_true",
+                    help="join by stream copy, no re-encode (needs --transition none): every clip must carry the same "
+                         "video and audio parameters (codec, size, rate, pixel format, sample rate, channels); a clip "
+                         "that does not is refused, by name, with what differs")
     ap.add_argument("--pad-color", default="black")
     ap.set_defaults(crf=18)  # --quality's default (the --crf alias was removed in 2.0)
     ap.add_argument("--preset", default="medium", choices=X264_PRESETS)
@@ -317,6 +541,8 @@ def main() -> int:
     aud.add_argument("--channels", type=int, choices=[1, 2, 6, 8], help="output channel count (default: the widest clip)")
     add_common(ap)
     args = ap.parse_args()
+    # given at all, not only different from the default: --quality 18 asks for an encode as much as 23 does
+    args.quality_given = any(a == "--quality" or a.startswith("--quality=") for a in sys.argv[1:])
     apply_common(args)
     if args.fps is not None and args.fps <= 0:
         die(f"--fps must be positive, got {args.fps:g}")
@@ -361,7 +587,8 @@ def main() -> int:
     STATE_SILENT[:] = sorted(intended + (silent if args.on_silent == "warn" else []), key=lambda s: s["index"])
     if silent and args.on_silent == "warn":
         listing = ", ".join(f"#{s['index'] + 1} {s['path']} (peak {s['peak_db']:.1f} dBFS)" for s in silent)
-        info(f"warning: {len(silent)} input(s) silent at or below {args.silence_threshold:g} dBFS, joined anyway: {listing}")
+        warn(f"{len(silent)} input(s) silent at or below {args.silence_threshold:g} dBFS, joined anyway: {listing}",
+             "silent_inputs", count=len(silent))
         STATE_NOTES.append(f"{len(silent)} input(s) have no audible sound (peak at or below {args.silence_threshold:g} dBFS) "
                            f"and were joined anyway: {listing}; pass --on-silent fail or skip to refuse or drop them")
     STATE_SKIPPED[:] = skipped
@@ -373,7 +600,7 @@ def main() -> int:
     STATE_DUPES[:] = dupes
     if dupes:
         listing = "; ".join(f"{dd['path']} at #" + ", #".join(str(i + 1) for i in dd["indices"]) for dd in dupes)
-        info(f"warning: input(s) listed more than once: {listing}")
+        warn(f"input(s) listed more than once: {listing}", "duplicate_inputs", count=len(dupes))
         STATE_NOTES.append(f"{len(dupes)} input(s) are listed more than once and joined each time: {listing}; "
                            "fine if the repeat is intended")
     STATE_PENDING[:] = pending
@@ -412,6 +639,8 @@ def main() -> int:
         for p, m in zip(args.inputs, metas):
             if not m.get("audio"):
                 die(f"{p} has neither a video nor an audio stream")
+        if args.copy:
+            die("--copy joins video clips; an audio-only join resamples every clip to one format, which a copy cannot do")
         return join_audio(args, metas)
     for p, m, pic in zip(args.inputs, metas, pictured):
         if not pic:
@@ -423,6 +652,8 @@ def main() -> int:
             die((f"{p} does not exist yet, and its audio extension says it will have no video stream" if m.get("dry_run")
                  else f"{p} has no video stream")
                 + (f" while {other}; join audio with audio or give every clip a picture" if other else ""))
+    if args.copy:
+        return join_copy(args, metas)
     first = metas[0]["video"]
     fw, fh = first["width"], first["height"]
     if first.get("rotation") in (90, -90, 270, -270):
@@ -562,12 +793,23 @@ def main() -> int:
     measured = (r.get("video") or {}).get("duration") or r.get("duration")
     verification = []
     if expected is not None and measured is not None and not STATE.dry_run:
-        tol = max(1.5 / fps, 0.05)
-        verification.append({"step": "duration", "ok": abs(measured - expected) <= tol,
-                             "measured": round(measured, 3), "expected": expected, "tolerance": round(tol, 3)})
+        tol = max(DURATION_TOLERANCE_FRAMES / fps, DURATION_TOLERANCE_MIN)
+        verification.append({"step": "duration", "property": "video_duration", "ok": abs(measured - expected) <= tol,
+                             "measured": round(measured, 3), "expected": expected,
+                             "delta": round(measured - expected, 3), "tolerance": round(tol, 3),
+                             "provenance": "input_premeasurement", "inputs_total": round(sum(lens), 3)})
+    # a clip with no audio stream is joined over generated silence: the join is right to do that, but
+    # the report must say which clips' sound is not theirs (the paper's join finding: absence was
+    # filled and nothing in the result showed it)
+    substituted = [p for p, m in zip(args.inputs, metas) if not m.get("audio")]
+    if substituted:
+        STATE_NOTES.append(f"{len(substituted)} clip(s) had no audio stream; their span of the join is generated "
+                           "silence: " + ", ".join(os.path.basename(p) for p in substituted))
     info(f"wrote {output} ({fmt_secs(measured)}, {expected_text(expected)}, {w}x{h} @ {fps:g}fps, {n} clips, {args.transition})")
-    emit(output, mode="video", **reported(), clips=n, transition=args.transition, expected_duration=expected,
-         verification=verification,
+    overlap = overlap_report(lens, expected)
+    emit(output, mode="video", **overlap, **reported(), clips=n, transition=args.transition, expected_duration=expected,
+         verification=verification, expect_streams={"video": 1, "audio": 1}, stream_reference=metas,
+         audio_substituted=substituted,
          dropped_non_av_streams=any(m.get("subtitle_streams") or m.get("data_streams") for m in metas))
     return 0
 

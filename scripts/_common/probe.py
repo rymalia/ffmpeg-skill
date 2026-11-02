@@ -12,7 +12,7 @@ import re
 import statistics
 from fractions import Fraction
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from _common.emit import die
+from _common.emit import die, warn
 from _common.runner import STATE, dry_run_input_pending, require_tool, run, run_analysis
 
 
@@ -135,6 +135,34 @@ def verify_output(path: str) -> Dict[str, Any]:
     return meta
 
 
+_TIMECODE = re.compile(r"^(\d{2}):([0-5]\d):([0-5]\d)([:;.])(\d{2,3})$")
+
+
+def _tag(entry: Dict[str, Any], key: str) -> Optional[str]:
+    return next((v for k, v in (entry.get("tags") or {}).items() if k.lower() == key), None)
+
+
+def start_timecode(streams: List[Dict[str, Any]], fmt: Dict[str, Any],
+                   video: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The first well-formed `timecode` tag, from the video stream, then a `tmcd` data stream,
+    then the container: {value, drop_frame, source}. `drop_frame` is the `;` (or `.`) separator
+    before the frames field; `source` is `stream:<ffprobe index>` or `format`. None when no
+    source carries one (all three null). A tag that is not HH:MM:SS[:;.]FF is skipped, not
+    repaired."""
+    candidates = []
+    if video is not None:
+        candidates.append((video, f"stream:{video.get('index')}"))
+    candidates += [(s, f"stream:{s.get('index')}") for s in streams
+                   if s.get("codec_type") == "data" and str(s.get("codec_tag_string", "")).lower() == "tmcd"]
+    candidates.append((fmt, "format"))
+    for entry, source in candidates:
+        value = _tag(entry, "timecode")
+        m = _TIMECODE.match(value.strip()) if isinstance(value, str) else None
+        if m:
+            return {"value": value.strip(), "drop_frame": m.group(4) in ";.", "source": source}
+    return {"value": None, "drop_frame": None, "source": None}
+
+
 def probe(path: str, role: str = "input") -> Dict[str, Any]:
     """Return a compact, script-friendly description of a media file.
 
@@ -206,12 +234,21 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
         "file": path,
         "format": fmt.get("format_name"),
         "duration": duration,
+        # where the file's timeline starts (MPEG-TS starts at 1.4 s, not 0): a -ss and a cut's
+        # --start count from here
+        "start_time": _to_float(fmt.get("start_time")),
         "size_bytes": _to_int(fmt.get("size")),
         "bitrate": _to_int(fmt.get("bit_rate")),
         "video": None,
         "audio": None,
         "subtitle_streams": len(subs),
         "data_streams": data_stream_count,
+        # how many picture and sound streams the file carries (a cover picture is not a video
+        # stream); the streams check compares them with what the operation should have written
+        "stream_counts": {
+            "video": sum(1 for s in streams if s.get("codec_type") == "video" and s.get("disposition", {}).get("attached_pic", 0) == 0),
+            "audio": sum(1 for s in streams if s.get("codec_type") == "audio"),
+        },
         # container-level chapter markers and the common tags, so metadata.py's result is
         # verifiable the same way every other tool's is (additive keys, 1.x-safe)
         "chapters": [{
@@ -221,6 +258,8 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "title": (ch.get("tags") or {}).get("title"),
         } for n, ch in enumerate(raw.get("chapters") or [])],
         "tags": {k.lower(): v for k, v in (fmt.get("tags") or {}).items() if k.lower() in ("title", "artist", "album", "comment", "date", "genre")},
+        # the source's start timecode (a camera's 10:00:00:00), for an edit list or an NLE relink
+        "timecode": start_timecode(streams, fmt, video),
         # every subtitle stream in file order: index n here is `-map 0:s:n`
         "subtitle_stream_details": [{
             "index": n,
@@ -286,6 +325,8 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "nb_frames": _to_int(video.get("nb_frames")),
             # the stream's own length (a container's also counts audio priming and a longer track)
             "duration": _to_float(video.get("duration")),
+            # Matroska/WebM keep the stream's length in a DURATION tag only, as for audio below
+            "tagged_duration": _tag_seconds((video.get("tags") or {}).get("DURATION")),
             # where the stream starts; a video stream that starts after its audio (or the reverse)
             # is how a lossless cut's A/V skew shows up
             "start_time": _to_float(video.get("start_time")),
@@ -300,6 +341,9 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "bitrate": _to_int(audio.get("bit_rate")),
             "duration": _to_float(audio.get("duration")),
             "start_time": _to_float(audio.get("start_time")),
+            # Matroska/WebM give no stream duration, only a DURATION tag; the container's own length
+            # is the longest stream's, which is not the sound's when the picture runs longer (2.20)
+            "tagged_duration": _tag_seconds((audio.get("tags") or {}).get("DURATION")),
         }
         # every audio stream in file order: index n here is `-map 0:a:n` (audio.py --audio-stream n)
         out["audio_streams"] = [{
@@ -420,7 +464,7 @@ def measure_frame_timing(path: str, duration: Optional[float], start: float = 0.
     time_base = None
     for i, t in enumerate(timing_window_starts(duration or 0.0, start)):
         proc = run([ffprobe, "-v", "error", "-select_streams", "V:0", "-show_packets",
-                    "-show_entries", "packet=pts,dts:stream=time_base", "-of", "json",
+                    "-show_entries", "packet=pts,dts,flags:stream=time_base", "-of", "json",
                     "-read_intervals", f"{t if i else ''}%{t + TIMING_WINDOW_SECONDS:.3f}", path], quiet=True, check=False)
         try:
             doc = json.loads(proc.stdout) if proc.returncode == 0 else None
@@ -430,8 +474,16 @@ def measure_frame_timing(path: str, duration: Optional[float], start: float = 0.
             return {"measured": "inconclusive", "windows": len(windows), "deltas": 0}
         time_base = time_base or ((doc.get("streams") or [{}])[0] or {}).get("time_base")
         tick = float(_fraction(str(time_base)) or 0) if time_base else 0.0
-        windows.append([p for p in complete_pts(doc.get("packets") or [])
-                        if isinstance(p, int) and p * tick >= t - 1e-6])
+        packets = doc.get("packets") or []
+        floor = t - 1e-6
+        if i:
+            # a seek into MPEG-TS lands mid-GOP, not on a keyframe: a frame stored before the
+            # landing point is missing, which read as a dropped frame (a constant TS measured
+            # `vfr`). Judge a seeked window from its first keyframe's presentation on.
+            key = next((p.get("pts") for p in packets if "K" in str(p.get("flags", "")) and isinstance(p.get("pts"), int)), None)
+            if key is not None:
+                floor = max(floor, key * tick - 1e-6)
+        windows.append([p for p in complete_pts(packets) if isinstance(p, int) and p * tick >= floor])
     return classify_frame_timing(windows, time_base)
 
 
@@ -495,6 +547,19 @@ def analyze_levels(path: str, seconds: float = 20.0) -> Dict[str, Any]:
         "note": ("flat, low-contrast, desaturated picture tagged as SDR: probably a Log profile (S-Log/V-Log/C-Log). "
                  "Apply the camera's conversion LUT with color.py --lut" if looks_log else "contrast and saturation look like normal display-referred SDR"),
     }
+
+
+def _tag_seconds(value: Any) -> "Optional[float]":
+    """A Matroska DURATION tag ("00:00:04.008000000") in seconds, or None."""
+    try:
+        if "-" in str(value):  # "-00:00:01": int("-00") is 0, so the sign would be lost
+            return None
+        h, m, sec = str(value).split(":")
+        seconds = int(h) * 3600 + int(m) * 60 + float(sec)
+    except (TypeError, ValueError):
+        return None
+    # float() reads "nan" and "inf": a length that is not a finite, non-negative number is none
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
 def _to_float(v: Any) -> Optional[float]:
@@ -569,6 +634,23 @@ CONTENT_MIN_SPAN = 0.1           # blackdetect minimum run, seconds
 CONTENT_FREEZE_NOISE = "-60dB"   # freezedetect noise tolerance
 CONTENT_FREEZE_MIN = 0.5         # freezedetect minimum run, seconds
 CONTENT_SILENCE_MIN = 0.5        # silencedetect minimum run, seconds
+# 2.17: a dropout is a short run of (near) digital silence with sound on both sides -- a join
+# that lost its audio, a glitched decode. Far quieter than the silence row's -50 dB, so a
+# recording's own pauses (room tone) do not count; a noise gate does produce them, which is
+# why the row only ever WARNs.
+CONTENT_DROPOUT_DB = -80.0
+CONTENT_DROPOUT_MIN, CONTENT_DROPOUT_MAX = 0.02, 1.0   # seconds
+CONTENT_DROPOUT_EDGE = 0.05      # a gap this close to the start or end is a lead-in/out, not a dropout
+CONTENT_DROPOUT_PAD = 2.0        # zeros appended before the dropout pass; > MAX, so a tail that runs into it never counts
+
+# 2.23: a flash is one frame that differs from both of its neighbours while they match each other
+# (a stray frame from another shot, a white or black frame at a join, a decode glitch). Measured on
+# 64x36 grey frames as the mean absolute luma difference (0-255): moving footage stays at a few
+# units, a cut or a flash moves the whole frame by tens.
+CONTENT_FLASH_JUMP = 12.0        # both steps into and out of the frame are at least this
+CONTENT_FLASH_RETURN = 0.25      # ...and the frames either side differ by at most this share of the smaller step
+CONTENT_FLAT_STD = 4.0           # first frame: luma standard deviation (0-255) below this is one flat colour
+_DIFF_W, _DIFF_H = 64, 36
 
 _BLACK_RE = re.compile(r"black_start:\s*([0-9.]+)\s+black_end:\s*([0-9.]+)")
 _FREEZE_RE = re.compile(r"lavfi\.freezedetect\.freeze_(start|end):\s*([0-9.]+)")
@@ -584,7 +666,7 @@ def detect_content(path: str, duration: float, *, video: bool = True, audio: boo
     ffmpeg = require_tool("ffmpeg")
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-i", path]
     if video:
-        cmd += ["-map", "0:v:0", "-vf", f"blackdetect=d={CONTENT_MIN_SPAN}:pix_th={CONTENT_BLACK_PIX_TH},"
+        cmd += ["-map", "0:V:0", "-vf", f"blackdetect=d={CONTENT_MIN_SPAN}:pix_th={CONTENT_BLACK_PIX_TH},"
                 f"freezedetect=n={CONTENT_FREEZE_NOISE}:d={CONTENT_FREEZE_MIN}"]
     if audio:
         cmd += ["-map", "0:a:0", "-af", f"silencedetect=noise={SILENT_PEAK_DBFS:g}dB:d={CONTENT_SILENCE_MIN}"]
@@ -618,7 +700,112 @@ def detect_content(path: str, duration: float, *, video: bool = True, audio: boo
         if start is not None:
             sil.append((start, end))
         out["silence"] = sil
+        out["dropouts"] = _detect_dropouts(path, end)
     return out
+
+
+def _detect_dropouts(path: str, end: float) -> "List[Tuple[float, float]]":
+    """Short (near) digital-silence gaps inside the first audio stream: one audio-only pass
+    (silencedetect at CONTENT_DROPOUT_DB). A second silencedetect in the main pass would log
+    under the same name as the silence row's, so its lines could not be told apart. The audio
+    is padded with CONTENT_DROPOUT_PAD s of zeros first: a silent tail of audio that ends before
+    the container does then runs into the pad and is too long to count, instead of closing at
+    the audio's EOF and passing the container-duration edge test."""
+    proc = run_analysis([require_tool("ffmpeg"), "-hide_banner", "-nostdin", "-i", path, "-map", "0:a:0", "-af",
+                         f"apad=pad_dur={CONTENT_DROPOUT_PAD:g},"
+                         f"silencedetect=noise={CONTENT_DROPOUT_DB:g}dB:d={CONTENT_DROPOUT_MIN}", "-f", "null", "-"],
+                        check=False, record=True)
+    if proc.returncode != 0:
+        die(f"dropout detection failed:\n{proc.stderr.strip()[-800:]}", kind="ffmpeg")
+    gaps: "List[Tuple[float, float]]" = []
+    start = None
+    for kind, val in SIL_RE.findall(proc.stderr):
+        if kind == "start":
+            start = float(val)
+        elif start is not None:
+            s, e = start, float(val)
+            start = None
+            inside = s > CONTENT_DROPOUT_EDGE and (not end or e < end - CONTENT_DROPOUT_EDGE)
+            if inside and CONTENT_DROPOUT_MIN <= e - s <= CONTENT_DROPOUT_MAX:
+                gaps.append((s, e))
+    return gaps  # a gap still open at the end is a tail, never a dropout
+
+
+def detect_flashes(path: str) -> "Optional[List[int]]":
+    """Frame indexes of single-frame flashes in the first video stream: frame n differs from n-1 and
+    from n+1 by at least CONTENT_FLASH_JUMP while n-1 and n+1 differ by at most
+    CONTENT_FLASH_RETURN of the smaller step. One video-only pass; ffmpeg reduces each frame to
+    three 16-bit numbers (|f[n]-f[n-1]| and the two clipped halves of f[n]-f[n-2]): 6 bytes a
+    frame in the captured output (1.3 MB for an hour at 60 fps), read in place. The caller turns an index into a time;
+    the comparison itself needs no frame rate. None when no frame decoded or the pass failed
+    (nothing was compared; a failure is also a flash_pass_failed warning)."""
+    if dry_run_input_pending(path):
+        return []
+    graph = (f"[0:V:0]scale={_DIFF_W}:{_DIFF_H}:flags=area,format=gray16le,split=3[a][b][c];"
+             "[a]tblend=all_mode=difference,scale=1:1:flags=area[d];"
+             "[b]tmix=frames=3:weights='-1 0 1':scale=1,scale=1:1:flags=area[p];"
+             "[c]tmix=frames=3:weights='1 0 -1':scale=1,scale=1:1:flags=area[q];"
+             "[d][p][q]hstack=inputs=3")
+    proc = run_analysis([require_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", "-i", path,
+                         "-filter_complex", graph, "-fps_mode", "passthrough", "-f", "rawvideo", "-"],
+                        check=False, text=False, record=True)
+    if proc.returncode != 0:
+        # an unmeasured row, not the end of the report: the other content rows stand
+        warn("flash detection failed: " + (proc.stderr.decode(errors="replace").strip().splitlines() or ["ffmpeg exited " + str(proc.returncode)])[-1][:300],
+             "flash_pass_failed")
+        return None
+    # tblend has no output for frame 0, so record r is frame r+1: a zero record in front puts
+    # every value at its own frame's index. passthrough keeps the rawvideo muxer from padding a
+    # constant rate, which repeated records over timestamp gaps (a repeat is a zero step, and a
+    # flash before a gap went unreported)
+    if len(proc.stdout) < 6:
+        return None
+    data = bytes(6) + proc.stdout
+    n = len(data) // 6
+
+    def record(i: int) -> "Tuple[float, float]":
+        """(|f[i] - f[i-1]|, |f[i] - f[i-2]|), 0-255; read from the buffer, never kept per frame."""
+        d, p, q = (int.from_bytes(data[i * 6 + k:i * 6 + k + 2], "little") / 256.0 for k in (0, 2, 4))
+        return d, p + q
+
+    flashes = []
+    into = record(1)[0] if n > 1 else 0.0
+    for i in range(1, n - 1):
+        out, back = record(i + 1)
+        if into >= CONTENT_FLASH_JUMP and out >= CONTENT_FLASH_JUMP and back <= CONTENT_FLASH_RETURN * min(into, out):
+            flashes.append(i)
+        into = out
+    return flashes
+
+
+def presentation_times(path: str, start: float) -> "List[float]":
+    """The presentation time of every frame of the first video stream (attached pictures
+    excluded), in order: its packets' pts sorted, those before the stream's own start (an edit
+    list's hidden pre-roll, never shown) dropped. From packets, so no decode. [] when unreadable,
+    also when one packet has no pts: skipping it would shift every later time onto the wrong frame."""
+    proc = run([require_tool("ffprobe"), "-v", "error", "-select_streams", "V:0", "-show_entries", "packet=pts_time",
+                "-of", "csv=p=0", path], quiet=True, check=False)
+    times = []
+    for line in (proc.stdout or "").split() if proc.returncode == 0 else []:
+        try:
+            times.append(float(line.split(",")[0]))
+        except ValueError:
+            return []
+    return sorted(t for t in times if t >= start - 1e-6)
+
+
+def first_frame_stats(path: str) -> "Optional[Tuple[float, float]]":
+    """(mean, standard deviation) of the first frame's luma, 0-255, at 64x36; None when it does
+    not decode or the input is a pending dry-run placeholder."""
+    if dry_run_input_pending(path):
+        return None
+    proc = run_analysis([require_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", "-i", path,
+                         "-map", "0:V:0", "-frames:v", "1", "-vf", f"scale={_DIFF_W}:{_DIFF_H}:flags=area,format=gray",
+                         "-f", "rawvideo", "-"], check=False, text=False, record=True)
+    px = list(proc.stdout[:_DIFF_W * _DIFF_H])
+    if proc.returncode != 0 or len(px) < _DIFF_W * _DIFF_H:
+        return None
+    return statistics.fmean(px), statistics.pstdev(px)
 
 
 SCORE_RE = re.compile(r"frame:(\d+)\s+pts:\d+\s+pts_time:([0-9.]+)")
@@ -678,3 +865,97 @@ def detect_scenes(path: str, threshold: float, min_len: float, duration: float, 
     if duration - cuts[-1] < min_len and len(cuts) > 1:
         cuts.pop()
     return cuts
+
+
+# What a stream-copy join compares (cut.py --segments, join.py --copy).
+# codecs that carry no out-of-band configuration in these containers, so no extradata on
+# either side is a match, not a difference
+IN_BAND_CONFIG = ("mp3", "mp2", "vp8", "vp9")
+TS_EXTS = (".ts", ".m2ts", ".mts")
+_SIG_FIELDS = {"video": ("codec_name", "profile", "pix_fmt", "width", "height", "r_frame_rate", "time_base",
+                         "sample_aspect_ratio", "color_space", "color_range", "color_transfer", "color_primaries"),
+               "audio": ("codec_name", "profile", "sample_rate", "channels", "time_base")}
+
+
+def stream_signature(doc: Dict[str, Any]) -> "List[Dict[str, Any]]":
+    """What a stream-copy join needs to be identical across parts, from one ffprobe document
+    (-show_streams with -show_data_hash sha256): each stream's type, codec parameters, rotation
+    and extradata hash. Shared by cut.py's --segments join and join.py --copy."""
+    sig = []
+    for st in doc.get("streams") or []:
+        kind = st.get("codec_type")
+        entry = {"type": kind, "extradata_hash": st.get("extradata_hash")}
+        entry.update({f: st.get(f) for f in _SIG_FIELDS.get(kind, ("codec_name",))})
+        if kind == "video":
+            entry["rotation"] = next((sd.get("rotation") for sd in st.get("side_data_list") or []
+                                      if "rotation" in sd), None)
+        sig.append(entry)
+    return sig
+
+
+def signatures_match(sigs: list, ext: str) -> bool:
+    """True when every part can be joined by stream copy: same streams in the same order with the
+    same parameters. A missing extradata hash only matches another missing one where the codec (or
+    an MPEG-TS output) carries its configuration in-band -- PCM has none at all."""
+    if not sigs or any(sig is None for sig in sigs):
+        return False
+    first = sigs[0]
+    for sig in sigs[1:]:
+        if len(sig) != len(first):
+            return False
+        for a, b in zip(first, sig):
+            if {k: v for k, v in a.items() if k != "extradata_hash"} != {k: v for k, v in b.items() if k != "extradata_hash"}:
+                return False
+            ha, hb = a.get("extradata_hash"), b.get("extradata_hash")
+            if ha or hb:
+                if ha != hb:
+                    return False
+            else:
+                codec = str(a.get("codec_name") or "")
+                if not (codec.startswith("pcm_") or codec in IN_BAND_CONFIG or ext in TS_EXTS):
+                    return False
+    return True
+
+
+# check.py --compare (2.24): the output's picture against a reference, frame by frame.
+COMPARE_SSIM_WARN = 0.98   # mean SSIM below this: a visible difference somewhere is likely
+# the channel letters follow the negotiated format: Y U V (or y u v) for YUV, R G B for RGB
+_SSIM_SUMMARY = re.compile(r"SSIM [A-Za-z]:[0-9.]+ .*All:([0-9.]+)")
+_PSNR_SUMMARY = re.compile(r"PSNR [a-z]:\S+ .*average:(\S+)")
+_SSIM_FRAME = re.compile(r"n:(\d+) .*All:([0-9.]+)")
+
+
+def compare_pictures(path: str, reference: str) -> "Optional[Dict[str, Any]]":
+    """SSIM (mean and the worst frame) and PSNR (mean) of `path`'s first video stream against
+    `reference`'s, frame by frame in decode order, in one pass. ffmpeg's ssim and psnr filters
+    need equal sizes; the caller checks that first. None when the pass fails."""
+    import tempfile
+    from _common.decision import escape_filter_path
+    with tempfile.TemporaryDirectory(prefix="ffskill_compare_") as tmp:
+        stats = os.path.join(tmp, "ssim.log")
+        # frames paired by index (settb/setpts=N): ssim and psnr otherwise pair by timestamp, so a
+        # shifted or irregular timestamp would meet the wrong reference frame
+        # shortest=1: by default the shorter file's last frame is repeated against the rest of
+        # the longer one, which measures pairs that do not exist. format=yuv444p on both: the
+        # filters otherwise take the first input's format, so an RGB file against a YUV one
+        # measured differently by argument order
+        graph = ("[0:V:0]settb=1/1000,setpts=N,format=yuv444p,split[a0][a1];"
+                 "[1:V:0]settb=1/1000,setpts=N,format=yuv444p,split[b0][b1];"
+                 f"[a0][b0]ssim=shortest=1:stats_file={escape_filter_path(stats, bind=False)};[a1][b1]psnr=shortest=1")
+        proc = run_analysis([require_tool("ffmpeg"), "-hide_banner", "-nostdin", "-i", path, "-i", reference,
+                             "-filter_complex", graph, "-f", "null", "-"], check=False, record=True)
+        if proc.returncode != 0:
+            return None
+        ssim, psnr = _SSIM_SUMMARY.search(proc.stderr), _PSNR_SUMMARY.search(proc.stderr)
+        frames = []
+        try:
+            with open(stats, encoding="utf-8") as fh:
+                frames = [(int(m.group(1)), float(m.group(2))) for m in map(_SSIM_FRAME.search, fh) if m]
+        except OSError:
+            pass
+    if not ssim or not frames:
+        return None
+    worst = min(frames, key=lambda f: f[1])
+    mean_psnr = psnr.group(1) if psnr else None
+    return {"ssim": float(ssim.group(1)), "worst_ssim": worst[1], "worst_frame": worst[0] - 1, "frames": len(frames),
+            "psnr": None if mean_psnr is None else (float("inf") if mean_psnr == "inf" else float(mean_psnr))}
