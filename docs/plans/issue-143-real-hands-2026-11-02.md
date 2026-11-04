@@ -1,6 +1,6 @@
 # #143 real-hands rows (Codex + macOS), 2026-11-02
 
-Status: **issues posted 2026-11-03** as #393 (finding 1), #394 (2), #395 (3), #396 (4), #397 (5); the #143 comment is **not posted**. The draft comment and candidate issues below are for the user to approve.
+Status: **issues posted 2026-11-03** as #393 (finding 1), #394 (2), #395 (3), #396 (4), #397 (5); the #143 comment was posted 2026-11-03 (https://github.com/kajisho5/ffmpeg-skill/issues/143#issuecomment-6624715127).
 Evidence is in `docs/evidence/143-real-hands-2026-11-02/`. The scratchpad copies are gone after the session.
 
 ## Setup
@@ -55,7 +55,7 @@ Since #321, the skill switches to the keg-only `ffmpeg-full` whenever it exists 
 
 Per the maintainer's rules these are bug/behaviour reports, so each would be an issue with a synthetic repro, one fix per issue. The fix shape is left to them. Finding 4 could be argued as docs drift (#143's table says `--cues`).
 
-## Draft comment for #143 (not posted)
+## Comment posted on #143 (2026-11-03)
 
 > **Codex and macOS (plain Homebrew `ffmpeg`) rows, run 2026-11-02 on a machine that isn't the maintainer's** (Apple M4 Max, macOS 27.2, ffmpeg-skill 3.1.1, Codex CLI 0.166.0 with gpt-5.6-luna, Claude Code 2.1.316 with Opus 5.5). Inputs were synthetic, in folders named `日本語 テスト 🎬/` etc.; one real iPhone HEVC/HLG clip was used for direct tool runs only.
 >
