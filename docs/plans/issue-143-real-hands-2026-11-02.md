@@ -1,6 +1,6 @@
 # #143 real-hands rows (Codex + macOS), 2026-11-02
 
-Status: **run, not posted.** The draft comment and candidate issues below are for the user to approve.
+Status: **issues posted 2026-11-03** as #393 (finding 1), #394 (2), #395 (3), #396 (4), #397 (5); the #143 comment is **not posted**. The draft comment and candidate issues below are for the user to approve.
 Evidence is in `docs/evidence/143-real-hands-2026-11-02/`. The scratchpad copies are gone after the session.
 
 ## Setup
@@ -61,11 +61,11 @@ Per the maintainer's rules these are bug/behaviour reports, so each would be an 
 >
 > | Device family | Install | Non-ASCII path | TikTok template | `look.py` sheet reviewed |
 > |---|---|---|---|---|
-> | Codex (`~/.agents/skills`) | pass: bare `npx ffmpeg-skill --codex` → `~/.agents/skills`, listed once, triggered on a plain request (read SKILL.md first) | pass | pass (`--template tiktok --srt`), but emoji drawn as tofu while reported monochrome → #A | pass |
-> | macOS, plain Homebrew `ffmpeg` (simulated, see below) | pass, but the installer says nothing about the missing drawtext/subtitles | pass | fails with an unclassified `No option name near …` error; `--dry-run` passed → #B | default `look.py` fails (`filter_missing`); doctor lists `look` as usable → #C |
+> | Codex (`~/.agents/skills`) | pass: bare `npx ffmpeg-skill --codex` → `~/.agents/skills`, listed once, triggered on a plain request (read SKILL.md first) | pass | pass (`--template tiktok --srt`), but emoji drawn as tofu while reported monochrome → #395 | pass |
+> | macOS, plain Homebrew `ffmpeg` (simulated, see below) | pass, but the installer says nothing about the missing drawtext/subtitles | pass | fails with an unclassified `No option name near …` error; `--dry-run` passed → #393 | default `look.py` fails (`filter_missing`); doctor lists `look` as usable → #394 |
 >
 > **The macOS question (does the agent read `caption.usable: "no"`?): no, for both Codex and Claude Code.** Both dry-ran `caption.py` (passed), ran it, hit the unclassified parse error, and only then ran `doctor`. Claude Code first suspected the non-ASCII filename, then reported the missing filter correctly. With a classified `filter_missing` error, or a dry run that refused, the detour wouldn't happen.
 >
-> Simulation, stated plainly: `ffmpeg-full` is installed here, so the real lean `Cellar/ffmpeg/9.0.2_1` binaries were copied into a fake prefix with no `opt/ffmpeg-full`, and the agents' shells were given a profile that puts it first. Discovery takes the plain-user path (`ffmpeg_source: path`, doctor `ok: false`). Because the full build still existed, one agent found it and switched to it, which a real plain-Homebrew Mac wouldn't allow. Also: `npx ffmpeg-skill@3.1.1` was refused by this machine's npm `min-release-age=3`, so bare `npx` installed 2.21.1; the 3.1.1 runs used a checkout install.
+> Simulation, stated plainly: `ffmpeg-full` is installed here, so the real lean `Cellar/ffmpeg/9.0.2_1` binaries were copied into a fake prefix with no `opt/ffmpeg-full`, and the agents' shells were given a profile that puts it first. Discovery takes the plain-user path (`ffmpeg_source: path`, doctor `ok: false`). Because the full build still existed, one agent found it and switched to it, which a real plain-Homebrew Mac wouldn't allow. Also: `npx ffmpeg-skill@3.1.1` was refused by this machine's npm `min-release-age=3`, so bare `npx` installed 2.21.1 on 11-02; on 11-03, after the guard window passed, the same `npx ffmpeg-skill --codex` installed 3.1.1 into `~/.agents/skills`.
 >
-> Issues filed from this: #A (emoji tofu reported as monochrome), #B (missing subtitles filter unclassified, dry run doesn't catch it), #C (doctor/look), #D (SRT given to `--cues`).
+> Issues filed from this: #393 (missing subtitles filter unclassified, dry run doesn't catch it), #394 (doctor/look), #395 (emoji tofu reported as monochrome), #396 (SRT given to `--cues`), #397 (cut drops the second audio track silently).
