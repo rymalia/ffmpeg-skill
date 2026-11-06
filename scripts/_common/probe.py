@@ -13,7 +13,7 @@ import statistics
 from fractions import Fraction
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from _common.emit import die, warn
-from _common.runner import STATE, dry_run_input_pending, require_tool, run, run_analysis
+from _common.runner import STATE, dry_run_input_pending, require_tool, run, run_analysis, still_input_args
 
 
 def fingerprint(path: str) -> Dict[str, Any]:
@@ -38,7 +38,8 @@ def decode_pcm_mono(path: str, sample_rate: int, seconds: Optional[float] = None
                     *, check: bool = True) -> List[float]:
     """Decode (part of) a file's audio to mono float samples in [-1, 1) at `sample_rate` via a
     single ffmpeg pass under --timeout. Shared by scenes.py (audio envelope for cut scoring) and
-    sync.py (cross-correlation); an undecodable input is kind ffmpeg when check=True, else []."""
+    sync.py (cross-correlation); an undecodable input is kind ffmpeg when check=True, else [].
+    The samples are on the file's clock: a sound that starts late is padded at its head."""
     ffmpeg = require_tool("ffmpeg")
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if start:
@@ -46,7 +47,10 @@ def decode_pcm_mono(path: str, sample_rate: int, seconds: Optional[float] = None
     cmd += ["-i", path]
     if seconds is not None:
         cmd += ["-t", f"{seconds:.3f}"]
-    cmd += ["-vn", "-ac", "1", "-ar", str(sample_rate), "-f", "s16le", "-"]
+    # first_pts=0 pads a sound that starts after the file's start (or after `start`) with silence,
+    # so sample i is at start + i / sample_rate on the file's clock: sync.py measured a track that
+    # starts 0.3 s late 0.279 s off, and --replace-audio placed it that far late (#409)
+    cmd += ["-vn", "-af", "aresample=async=1:first_pts=0", "-ac", "1", "-ar", str(sample_rate), "-f", "s16le", "-"]
     proc = run_analysis(cmd, check=False, text=False)
     if proc.returncode != 0 or not proc.stdout:
         if check:
@@ -142,23 +146,40 @@ def _tag(entry: Dict[str, Any], key: str) -> Optional[str]:
     return next((v for k, v in (entry.get("tags") or {}).items() if k.lower() == key), None)
 
 
+def _nominal_fps(video: Optional[Dict[str, Any]]) -> Optional[int]:
+    """The integer timecode rate of the picture (30 for 29.97), from avg_frame_rate, else
+    r_frame_rate: the order probe()'s `fps` uses, which the timeline export validates against."""
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        try:
+            num, _, den = str((video or {}).get(key) or "").partition("/")
+            rate = float(num) / float(den or 1)
+        except (ValueError, ZeroDivisionError):
+            continue
+        if 0 < rate <= 240:
+            return int(round(rate))
+    return None
+
+
 def start_timecode(streams: List[Dict[str, Any]], fmt: Dict[str, Any],
                    video: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The first well-formed `timecode` tag, from the video stream, then a `tmcd` data stream,
     then the container: {value, drop_frame, source}. `drop_frame` is the `;` (or `.`) separator
     before the frames field; `source` is `stream:<ffprobe index>` or `format`. None when no
-    source carries one (all three null). A tag that is not HH:MM:SS[:;.]FF is skipped, not
-    repaired."""
+    source carries one (all three null). A tag that is not HH:MM:SS[:;.]FF, or whose frames field
+    the picture's rate cannot reach, is skipped, not repaired."""
     candidates = []
     if video is not None:
         candidates.append((video, f"stream:{video.get('index')}"))
     candidates += [(s, f"stream:{s.get('index')}") for s in streams
                    if s.get("codec_type") == "data" and str(s.get("codec_tag_string", "")).lower() == "tmcd"]
     candidates.append((fmt, "format"))
+    nominal = _nominal_fps(video)
     for entry, source in candidates:
         value = _tag(entry, "timecode")
         m = _TIMECODE.match(value.strip()) if isinstance(value, str) else None
-        if m:
+        # a frames field the picture's rate cannot reach (frame 29 at 25 fps) is no timecode
+        # either: the next candidate (a tmcd track's own tag) may still hold a real one (#427)
+        if m and not (nominal and int(m.group(5)) >= nominal):
             return {"value": value.strip(), "drop_frame": m.group(4) in ";.", "source": source}
     return {"value": None, "drop_frame": None, "source": None}
 
@@ -187,7 +208,8 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
         die(f"input not found: {path}")
     ffprobe = require_tool("ffprobe")
     proc = run(
-        [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters", path],
+        [ffprobe, "-v", "error", *still_input_args(path),
+         "-print_format", "json", "-show_format", "-show_streams", "-show_chapters", path],
         quiet=True,
         check=False,
     )
@@ -283,6 +305,12 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
                 rotation = int(video["tags"]["rotate"])
             except ValueError:
                 pass
+        if not rotation and _is_still(fmt, video):
+            # an EXIF Orientation reaches ffmpeg as the decoded frame's display matrix, not as
+            # stream side data, so -show_streams has no rotation for a phone's portrait JPEG;
+            # ffmpeg still turns the picture upright on decode, and every tool that sizes the
+            # frame has to know it did (#411)
+            rotation = _still_rotation(path)
         pix = video.get("pix_fmt") or ""
         trc = video.get("color_transfer") or ""
         prim = video.get("color_primaries") or ""
@@ -300,6 +328,10 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "width": w,
             "height": h,
             "display_aspect": video.get("display_aspect_ratio") or _aspect_string(w, h),
+            # the stored pixel's shape (DV, HDV 1440x1080, DVD and XDCAM store non-square pixels);
+            # every tool that sizes or draws on the picture works on square pixels at the display
+            # aspect (square_pixels() / display_size() below)
+            "sample_aspect_ratio": _sar_string(video.get("sample_aspect_ratio")),
             "fps": round(fps, 3) if fps else None,
             "r_frame_rate": video.get("r_frame_rate"),
             "avg_frame_rate": video.get("avg_frame_rate"),
@@ -317,6 +349,10 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "hdr_format": (("Dolby Vision %s" % (("profile %s" % dovi["profile"]) if dovi and dovi.get("profile") is not None else "")).strip() if dovi else
                            "HDR10/PQ" if trc == "smpte2084" else "HLG" if trc == "arib-std-b67" else "BT.2020 SDR" if hdr else None),
             "dolby_vision": dovi,
+            # HDR10 static metadata (mastering display, content light level) as the encoders take it:
+            # FFmpeg before 7 does not hand it from the decoded frames to libx265 / libsvtav1, so the
+            # tools pass it explicitly (decision.hdr10_x265_params). None when the source has none.
+            "hdr10_static": _hdr10_static(ffprobe, path, video) if trc == "smpte2084" else None,
             "color_space": video.get("color_space"),
             "color_primaries": video.get("color_primaries"),
             "color_transfer": video.get("color_transfer"),
@@ -355,7 +391,76 @@ def probe(path: str, role: str = "input") -> Dict[str, Any]:
             "language": (a.get("tags") or {}).get("language"),
             "title": (a.get("tags") or {}).get("title"),
         } for n, a in enumerate(s for s in streams if s.get("codec_type") == "audio")]
+    if role == "input" and out.get("video") and out["video"].get("codec") \
+            and os.path.splitext(path)[1].lower() not in _STILL_EXT:
+        # a still (an overlay's logo, an insert card) is not a second picture source (#412 review)
+        STATE.video_inputs.add(os.path.realpath(path))
+    if role == "input" and out.get("audio_streams"):
+        STATE.audio_inputs.add(os.path.realpath(path))
+    if role == "input" and getattr(STATE, "first_input", None) is None:
+        STATE.first_input = (path, len(out.get("audio_streams") or []),
+                             (out.get("video") or {}).get("hdr10_static"))
+    if role == "input" and out["timecode"].get("value") and getattr(STATE, "source_timecode", None) is None:
+        STATE.source_timecode = (out["timecode"]["value"], duration)
     return out
+
+
+def _hdr10_static(ffprobe: str, path: str, stream: Dict[str, Any]) -> "Optional[Dict[str, Any]]":
+    """A PQ stream's mastering display and content light level, from the stream (an mdcv/clli box,
+    a Matroska colour element) or else its first frame (the HEVC SEI / AV1 metadata OBU): one
+    frame is decoded when either part is missing or incomplete in the stream. Each part is taken
+    from wherever it is complete first, the stream before the frame. Chromaticities are CIE 1931
+    x/y, luminances cd/m2. None when it has neither."""
+    out = _hdr10_parts(stream.get("side_data_list") or [])
+    if len(out) < 2:
+        # V:0, not v:0: an attached cover picture before the motion video has no HDR side data
+        proc = run([ffprobe, "-v", "error", "-select_streams", "V:0", "-read_intervals", "%+#1", "-show_frames",
+                    "-show_entries", "frame=side_data_list", "-of", "json", path], quiet=True, check=False)
+        frames: List[Dict[str, Any]] = []
+        if proc.returncode == 0:
+            try:
+                frames = json.loads(proc.stdout or "{}").get("frames") or []
+            except ValueError:
+                pass
+        for k, v in _hdr10_parts((frames[0].get("side_data_list") or []) if frames else []).items():
+            out.setdefault(k, v)
+    return out or None
+
+
+def _hdr10_parts(sides: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """The complete parts in one side-data list: a mastering display with every field, a content
+    light level with both values; an incomplete record counts as absent."""
+    out: Dict[str, Any] = {}
+    for sd in sides:
+        kind = _side_kind(sd)
+        if kind == "mastering" and "mastering_display" not in out:
+            vals = {k: _ratio(sd.get(k)) for k in ("red_x", "red_y", "green_x", "green_y", "blue_x", "blue_y",
+                                                    "white_point_x", "white_point_y", "min_luminance", "max_luminance")}
+            if all(v is not None for v in vals.values()):
+                out["mastering_display"] = {k: float(v) for k, v in vals.items()}
+        elif kind == "light" and "content_light" not in out:
+            mc, ma = _to_int(sd.get("max_content")), _to_int(sd.get("max_average"))
+            if mc is not None and ma is not None:
+                out["content_light"] = {"max_content": mc, "max_average": ma}
+    return out
+
+
+_STILL_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".avif", ".heic")
+
+
+def _ratio(v: Any) -> "Optional[Fraction]":
+    """A side-data value such as "34000/50000" or "0/10000". Unlike _fraction() a zero is a value
+    (a mastering display's minimum luminance may be 0 cd/m2); only a missing or malformed one is None."""
+    try:
+        f = Fraction(str(v))
+    except (ValueError, ZeroDivisionError, TypeError):
+        return None
+    return f if f >= 0 else None
+
+
+def _side_kind(sd: Dict[str, Any]) -> "Optional[str]":
+    t = str(sd.get("side_data_type") or "")
+    return "mastering" if t == "Mastering display metadata" else "light" if t == "Content light level metadata" else None
 
 
 def _bit_depth(pix_fmt: Optional[str]) -> int:
@@ -584,6 +689,83 @@ def _fraction(v: Optional[str]) -> Optional[Fraction]:
         return f if f > 0 else None
     except (ValueError, ZeroDivisionError):
         return None
+
+
+def _sar_string(v: Optional[str]) -> str:
+    """ffprobe's sample_aspect_ratio as "N:D", "1:1" when unset (0:1, N/A, missing)."""
+    f = _fraction((v or "").replace(":", "/"))
+    return f"{f.numerator}:{f.denominator}" if f else "1:1"
+
+
+def pixel_aspect(video: Optional[Dict[str, Any]]) -> Fraction:
+    """The stored pixel's width over its height (the SAR); 1 when the stream does not say."""
+    return _fraction(str((video or {}).get("sample_aspect_ratio") or "").replace(":", "/")) or Fraction(1)
+
+
+def _square_size(video: Optional[Dict[str, Any]]) -> "Tuple[int, int, Fraction]":
+    """(width, height, SAR) of the frame the filter graph receives: rotation applied (ffmpeg
+    autorotates on decode, and its transpose turns the SAR over too), pixels not yet squared."""
+    video = video or {}
+    w, h = int(video.get("width") or 0), int(video.get("height") or 0)
+    sar = pixel_aspect(video)
+    if video.get("rotation") in (90, -90, 270, -270):
+        w, h, sar = h, w, 1 / sar
+    return w, h, sar
+
+
+def display_size(video: Optional[Dict[str, Any]]) -> "Tuple[int, int]":
+    """The displayed frame in square pixels: rotation applied, and a non-square-pixel picture
+    widened or narrowed to its display aspect at its own height (1440x1080 at 4:3 is 1920x1080,
+    720x480 at 8:9 is 640x480). It is the frame square_pixels() hands the rest of a graph, so a
+    tool sizes, places and draws in it. 0x0 when unknown (a dry run's pending input)."""
+    w, h, sar = _square_size(video)
+    if w and h and sar != 1:
+        w = max(2, int(round(w * sar / 2)) * 2)
+    return w, h
+
+
+def square_pixels(video: Optional[Dict[str, Any]]) -> str:
+    """The filter that makes a non-square-pixel picture square at its display aspect
+    ("scale=640:360,setsar=1"), or "" when the pixels are square already. A tool that scales,
+    crops, places or draws starts its video chain with it, so every such tool agrees on one
+    frame (display_size()) and nothing is squashed or drawn stretched (#411). Tools that only
+    re-encode keep the stored size and its SAR, which the encoder writes through."""
+    w, h, sar = _square_size(video)
+    if not (w and h) or sar == 1:
+        return ""
+    dw, dh = display_size(video)
+    return f"scale={dw}:{dh},setsar=1"
+
+
+def square_pixels_note(video: Optional[Dict[str, Any]], what: str = "the input") -> Optional[str]:
+    """The notes line for a square_pixels() scale, or None when there is none."""
+    if not square_pixels(video):
+        return None
+    w, h, _ = _square_size(video)
+    dw, dh = display_size(video)
+    return (f"{what} stores non-square pixels (SAR {(video or {}).get('sample_aspect_ratio')}): "
+            f"its {w}x{h} picture was scaled to {dw}x{dh} square pixels, its display aspect")
+
+
+def _is_still(fmt: Dict[str, Any], video: Dict[str, Any]) -> bool:
+    """A single picture read by an image demuxer (image2, jpeg_pipe, png_pipe, ...)."""
+    name = fmt.get("format_name") or ""
+    return name == "image2" or name.endswith("_pipe")
+
+
+def _still_rotation(path: str) -> int:
+    """The display rotation of a still's first decoded frame (an EXIF Orientation), 0 if none."""
+    proc = run([require_tool("ffprobe"), "-v", "error", *still_input_args(path), "-select_streams", "v:0",
+                "-read_intervals", "%+#1", "-show_entries", "frame_side_data=rotation", "-of", "json", path],
+               quiet=True, check=False)
+    try:
+        frames = json.loads(proc.stdout or "{}").get("frames") or []
+        for sd in (frames[0].get("side_data_list") or []) if frames else []:
+            if "rotation" in sd:
+                return int(round(float(sd["rotation"])))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return 0
 
 
 def _aspect_string(w: Optional[int], h: Optional[int]) -> Optional[str]:

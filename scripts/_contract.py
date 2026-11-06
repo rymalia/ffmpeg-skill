@@ -109,7 +109,7 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                     required=FF + [X264, AAC, "filter:v360"], optional=[HDR_X265],
                     video_required=True, audio_only=False, visual=True, verify=["probe", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "grid": dict(role="execution", inputs=["cols*rows video assets, filled left-to-right top-to-bottom"], outputs=["composited grid video artifact"],
-                 required=FF + [X264, "filter:xstack"], optional=[{"capability": "filter:drawtext", "when": "--label auto (the default)"}, {"capability": AAC, "when": "--audio-from"}],
+                 required=FF + [X264, "filter:xstack"], optional=[{"capability": "filter:drawtext", "when": "--label auto (the default; without drawtext the cells are not labelled, fallback grid_no_drawtext)"}, {"capability": AAC, "when": "--audio-from"}],
                  video_required=True, audio_only=False, visual=True, verify=["probe", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "straighten": dict(role="execution", inputs=["video asset"], outputs=["video artifact rotated by the given angle (horizon correction)"],
                        required=FF + [X264, AAC, "filter:rotate"], optional=[HDR_X265],
@@ -131,7 +131,7 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                                             {"capability": "filter:scdet", "when": "--auto-chapters --from scenes|both"}],
                      video_required=False, audio_only=True, visual=False, verify=["probe"], produces_artifact=True, idempotency="bit_exact", deterministic=True),
     "loop": dict(role="execution", inputs=["video asset"], outputs=["video artifact repeated to the requested count or duration (--boomerang: played forward then backward, silent)"],
-                 required=FF + [X264, AAC], optional=[{"capability": "filter:reverse", "when": "--boomerang"}, {"capability": "filter:loop", "when": "--boomerang"}],
+                 required=FF + [X264, AAC], optional=[{"capability": "filter:reverse", "when": "--boomerang"}, {"capability": "filter:loop", "when": "--boomerang"}, {"capability": "filter:xfade", "when": "--crossfade"}, {"capability": "encoder:ffv1", "when": "--crossfade"}, {"capability": "encoder:flac", "when": "--crossfade"}],
                  video_required=True, audio_only=False, visual=True, verify=["probe", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "insert": dict(role="execution", inputs=["still image"], outputs=["silent video artifact of the requested duration / frame size / fps"],
                    required=FF + [X264], optional=[{"capability": "filter:zoompan", "when": "--zoom / --pan"}],
@@ -197,8 +197,8 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                   required=FF + [X264, AAC], optional=[HDR_X265],
                   video_required=True, audio_only=False, visual=True, verify=["probe", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
     "export": dict(role="execution", inputs=["video asset"], outputs=["delivery artifact in the preset's format"],
-                   required=FF, optional=[{"capability": X264, "when": "preset youtube / youtube4k / reels / x"}, {"capability": AAC, "when": "preset youtube / youtube4k / reels / x / h265 (prores uses pcm_s16le, copy stream-copies, gif has no audio)"},
-                                          {"capability": X265, "when": "preset h265"}, {"capability": "encoder:prores_ks", "when": "preset prores"},
+                   required=FF, optional=[{"capability": X264, "when": "preset youtube / youtube4k / reels / x"}, {"capability": AAC, "when": "preset youtube / youtube4k / reels / x / h265 (prores and dnxhr-* use pcm_s16le, copy stream-copies, gif has no audio)"},
+                                          {"capability": X265, "when": "preset h265"}, {"capability": "encoder:prores_ks", "when": "preset prores"}, {"capability": "encoder:dnxhd", "when": "preset dnxhr-lb / dnxhr-sq / dnxhr-hq / dnxhr-hqx / dnxhr-444"}, {"capability": "encoder:prores_ks", "when": "preset prores4444 / prores4444xq / key-fill"}, {"capability": "encoder:qtrle", "when": "preset qtrle"}, {"capability": "encoder:libvpx-vp9", "when": "preset vp9-alpha"}, {"capability": "encoder:hap", "when": "preset hap-alpha (an ffmpeg built with snappy)"}, {"capability": "filter:alphaextract", "when": "an alpha preset (the alpha is read back)"},
                                           {"capability": "filter:palettegen", "when": "preset gif"}, {"capability": "encoder:gif", "when": "preset gif"}, {"capability": "filter:boxblur", "when": "--pad-fill blur or --fit blur"},
                                                      {"capability": "filter:eq", "when": "--fit blur (the background copy is dimmed)"},
                                           {"capability": "filter:loudnorm", "when": "preset youtube / youtube4k / reels / x with audio: the written file is measured against the platform's loudness target (result `loudness`)"}],
@@ -213,13 +213,13 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
                                                             {"capability": "ffmpeg", "when": "--beats (one audio decode for the onset pass)"}],
                    video_required=True, audio_only=False, visual=False, verify=[], produces_artifact=True, idempotency="bit_exact", deterministic=True),
     "look": dict(role="verification", inputs=["video artifact"], outputs=["PNG contact sheet / frames / side-by-side"],
-                 required=FF + ["filter:tile"], optional=[{"capability": "filter:drawtext", "when": "timecode stamps (default; --no-timecode to skip)"},
+                 required=FF + ["filter:tile"], optional=[{"capability": "filter:drawtext", "when": "timecode stamps (default; without drawtext the sheet is drawn without them, fallback look_no_drawtext)"},
                                                           {"capability": "filter:drawbox", "when": "--safe NAME (the platform's occluded zones)"}, {"capability": "filter:zscale", "when": "HDR source"}, {"capability": "filter:tonemap", "when": "HDR source"}],
                  video_required=True, audio_only=False, visual=False, verify=[], produces_artifact=True, idempotency="bit_exact", deterministic=True),
     "render": dict(role="execution", inputs=["project.json (clips, transitions, captions, overlays, audio, loudness, export, check)", "media asset plus --template NAME (a shipped delivery template)"], outputs=["final video artifact", "one artifact per destination plus a pack table (--template all)", "work directory of stage outputs (--keep / --work)", "editor timeline (.fcpxml / .edl / .otio) instead of a render (--export-timeline)"],
                    required=FF, optional=[{"capability": "delegated", "when": "each stage (and each destination of --template) runs cut / join / fit / caption / graphics / overlay / audio / loudness / export / check with their capabilities"}],
                    video_required=False, audio_only=True, visual=True, verify=["probe", "check", "look"], produces_artifact=True, idempotency="content_equivalent", deterministic=True),
-    "batch": dict(role="execution", inputs=["folder of media", "batch.json recipe (steps or a render project)"], outputs=["one artifact per input file in the recipe's output_dir", "content-hash cache"],
+    "batch": dict(role="execution", inputs=["folder of media", "batch.json recipe (steps or a render project)"], outputs=["one artifact per input file in the recipe's output_dir (none for a steps recipe, not a render project, in which no step names {out}: its rows carry written: false)", "content-hash cache"],
                   required=FF, optional=[{"capability": "delegated", "when": "each recipe step runs the named script with its capabilities"}],
                   video_required=False, audio_only=True, visual=False, verify=["probe"], produces_artifact=True, idempotency="cached", deterministic=True),
     "verify": dict(role="verification", inputs=["media files and/or folders"], outputs=["PASS/FAIL JSON per step", "Markdown report (--report)", "step outputs (--out / --keep)"],
@@ -276,7 +276,7 @@ REENCODE_META: Dict[str, Dict[str, str]] = {
     "speedramp": dict(video="always", audio="always", note="setpts/atempo per segment always forces a re-encode of both streams"),
     "broll":    dict(video="always", audio="conditional", note="the overlay graph always re-encodes the video stream; A's audio is stream-copied under --audio a and re-encoded to AAC under --audio b/mix"),
     "metadata": dict(video="never", audio="never", note="-c copy on every stream; only the container's chapters and tags change -- --auto-chapters decodes to measure, but still writes with -c copy"),
-    "loop":     dict(video="always", audio="conditional", note="-stream_loop always re-encodes both streams; the audio codec is always AAC when present. --boomerang re-encodes the video through reverse/loop filters and drops the audio"),
+    "loop":     dict(video="always", audio="conditional", note="the repeats (the concat demuxer, the file listed once per repeat) always re-encode both streams; the audio codec is always AAC when present. --crossfade first writes one repeat losslessly (FFV1 + FLAC, a temporary file) and repeats that, so the output still has one lossy encode. --boomerang re-encodes the video through reverse/loop filters and drops the audio"),
     "insert":    dict(video="always", audio="never", note="always encodes a fresh silent clip from the still image; there is no audio stream to touch"),
     "background": dict(video="always", audio="never", note="always encodes a fresh generated clip; there is no input to copy from"),
     "reverse":   dict(video="always", audio="conditional", note="video always re-encodes (reverse buffers and re-emits every frame); audio re-encodes to AAC when present and not dropped by --no-audio"),
@@ -440,6 +440,9 @@ ERROR_REASONS = {
     "encoder_missing": "--codec av1/prores: the build's encoder list was read and has no encoder for the codec (kind missing_tool; details: {codec, encoders}); or ffmpeg itself reported \"Unknown encoder\" for the encoder the command named (kind ffmpeg; details: {name}; the hint points at doctor)",
     "asr_engine_missing": "kind missing_tool: --transcribe (caption.py, silence.py --filler) found no local speech-to-text engine; the message lists the install lines; details: {}",
     "encoder_list_unreadable": "--codec av1/prores: the build's encoder list could not be read, so whether it has the encoder is unknown (kind ffmpeg); details: {codec, encoders, error}",
+    "no_speech": "kind input: --transcribe (caption.py, silence.py --filler) ran a local speech engine that heard no speech in the input; details: {engine}; also top-level reason and engine",
+    "engine_failed": "kind input: --transcribe: an installed speech engine ran and failed (a named --engine, or every engine --engine auto found); details: {engine, detail | engines: [{engine, reason, detail}]}; also top-level reason, engine and detail/engines",
+    "english_only": "kind input: --transcribe under --engine auto found only Parakeet engines, which it runs for English speech only, and the language is not English; details: {engine, engines}; also top-level reason, engine and engines",
 }
 
 # The codes of the collector's records (docs/design-decisions.md, "Nothing happens silently"):
@@ -454,7 +457,7 @@ DIAGNOSTIC_CODES = {
     "audit_log_unwritable": ("warnings", "an audit record could not be appended; never fails the run; {path, event, error}"),
     "plan_unbound_inputs": ("warnings", "render.py PLAN: inputs that did not exist when the plan was made, so were not checked; {paths}"),
     # the runner
-    "odd_dimensions_scaled_even": ("fallbacks", "an encode that failed on odd dimensions was run again scaled to even ones (the frame loses a row or column); {output, scale}"),
+    "odd_dimensions_scaled_even": ("fallbacks", "an encode that failed on odd dimensions was run again scaled to even ones, or a graph the retry cannot reach (broll.py's filter_complex) was scaled to even ones up front (the frame loses a row or column); {output, scale}"),
     "measurement_input_pending": ("skipped", "--dry-run: a measurement skipped because its input is an earlier stage's output that does not exist yet; {path}"),
     "non_av_streams_dropped": ("fallbacks", "the subtitle/data streams could not be copied, so the encode ran again without them (dropped_non_av_streams: true); {output, returncode, error: the first attempt's last stderr lines}; export.py adds dropped: the stream types this retry leaves out (data alone first, then subtitle too)"),
     "ffmpeg_list_unreadable": ("warnings", "`ffmpeg -encoders` / `-bsfs` could not be read; what needs the list says so instead of 'the build lacks it'; {list, tool, error}"),
@@ -463,6 +466,12 @@ DIAGNOSTIC_CODES = {
     "av1_encoder_libaom": ("fallbacks", "--codec av1 on a build without libsvtav1: libaom-av1 encoded instead; {wanted, used}"),
     "crf_clamped": ("warnings", "the CRF handed to the encoder was above its maximum and was capped (the HEVC HDR line adds 2); {encoder, requested, asked, used}"),
     # fonts and text
+    "emoji_not_drawn": ("warnings", "caption.py --emoji auto: no glyph, colour path or PNG asset draws these emoji here (doctor fonts.emoji mode none), so they were left out of the drawn text; {count, reason}"),
+    "hdr10_metadata_dropped": ("warnings", "a PQ output measured without the source's HDR10 mastering-display and/or content-light metadata (an encoder with no option for it, e.g. prores_ks or libaom on FFmpeg before 7); {dropped, codec}"),
+    "audio_tracks_dropped": ("warnings", "the source has more audio tracks than the output kept (the tools write one; cut.py also reports dropped_audio_streams). Not compared when two or more inputs have sound (grid --audio-from, a mix): which source the output carries is the tool's choice; {source, kept, dropped}"),
+    "grid_no_drawtext": ("fallbacks", "grid.py --label auto on a build without the drawtext filter: the cells were not labelled, as with --label none"),
+    "scenes_sheet_no_drawtext": ("fallbacks", "scenes.py --sheet on a build without the drawtext filter: the sheet was drawn without timecode stamps, as with --no-timecode"),
+    "look_no_drawtext": ("fallbacks", "look.py on a build without the drawtext filter: the sheet was drawn without timecode stamps, as with --no-timecode"),
     "font_substituted": ("fallbacks", "the asked font family is not installed: fontconfig or the Windows Fonts folder gave another (font_used names it); {asked, file, family, via}"),
     "font_lacks_script": ("warnings", "an explicit --font does not cover the text's script and is kept as asked; {font, script}"),
     "font_coverage_unverified": ("warnings", "whether a font covers the text's script could not be checked (no fontconfig / fc-scan); {script, fonts_dir?}"),
@@ -541,13 +550,23 @@ FONT_USED_SCHEMA = {
 }
 
 
+# the tools whose --json carries `dropped_non_av_streams` (a test reads the sources)
+NON_AV_STREAM_TOOLS = frozenset({"audio", "broll", "color", "cut", "deinterlace", "denoise", "export", "fit", "freeze",
+                                 "graphics", "join", "loudness", "overlay", "pad", "proxy", "redact", "speedramp",
+                                 "sphere", "straighten"})
+
+
 def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str, Any]:
     """What the tool prints on stdout with --json (keys observed in the implementation). `hw`: the
     tool takes --hw, so its `notes` can also carry a VideoToolbox encode's quality line."""
     if name == "probe":
         return {"type": "object", "description": "one probe document, or an array of them for several inputs",
                 "properties": {"file": {"type": "string"}, "format": {"type": "string"}, "duration": {"type": "number"}, "size_bytes": {"type": "integer"},
-                               "video": {"type": ["object", "null"]}, "audio": {"type": ["object", "null"]}}, "additionalProperties": True}
+                               "video": {"type": ["object", "null"]}, "audio": {"type": ["object", "null"]},
+                               "timecode": {"type": "object", "description": "3.0.0: the source's start timecode {value, drop_frame, source}: the first HH:MM:SS[:;.]FF timecode tag from the video stream, then a tmcd data stream, then the container; all three null when none carries one"},
+                               "chapters": {"type": "array", "description": "the container's chapter markers [{index, start, end, title}]"},
+                               "subtitle_stream_details": {"type": "array", "description": "every subtitle stream in file order [{index (the n of -map 0:s:n), codec, language, title}]"}},
+                "additionalProperties": True}
     base = {"status": {"enum": ["completed"]}, "output": {"type": ["string", "null"], "description": "path written, or null"},
             "dry_run": {"type": "boolean"}, "commands": {"type": "array", "items": {"type": "string"}, "description": "every ffmpeg command line planned or run"},
             "probe": {"type": "object", "description": "probe of the output when a file was written"},
@@ -588,6 +607,13 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
                  "speech": {"type": "array", "description": "--speech (1.18): [{time, speech_music_ratio}]"}}
     elif name == "silence":
         extra = {"silences": {"type": "array"}, "keep": {"type": "array"}, "input_duration": {"type": "number"}, "kept_duration": {"type": "number"}, "removed_seconds": {"type": "number"},
+                 "removed_seconds_total": {"type": "number", "description": "--filler: seconds removed in all, silence plus filler words (removed_seconds stays the silence alone)"},
+                 "cut_points": {"type": ["array", "null"], "description": "2.22: per cut {source_time, output_time, edge (out|in), rms_dbfs (the loudest channel 50 ms either side on the source; null for digital silence), filler (true on a removed filler word's edge)}; null when the source could not be decoded for it (cut_levels_unmeasured warning)"},
+                 "cut_warnings": {"type": ["array", "null"], "description": "the cut_points (not filler cuts) within 10 dB of --threshold: where to listen (a cut_near_sound warning); verified is unchanged"},
+                 "timemap": {"type": "string", "description": "--timemap FILE: the source-to-output time map written (JSON or CSV)"},
+                 "silence_kinds": {"type": "array", "description": "2.20: per detected silence, digital (at or below -90 dBFS) or below_threshold"},
+                 "silence_breakdown": {"type": "object", "description": "2.20: {digital, below_threshold}: the count and seconds of each, with the level that defines it"},
+                 "hint": {"type": "string", "description": "when nothing sat below --threshold: the track's measured level and the --threshold that would find its pauses"},
                  "speech_aware": {"type": "object", "description": "--speech-aware (1.18): {min_silence, floor, breaths_kept, breaths_kept_seconds, breaths}"},
                  "filler": {"type": "object", "description": "--filler: {lang, source (whisper-json:FILE | whisper:ENGINE | parakeet:ENGINE), engine, transcription (with --transcribe: {engine, model, language, routing}), removed, removed_count, matched_untimed (listed words in the transcript with no usable timing, not removed), matched_too_long (listed words longer than a filler, kept), ...}"},
                  "notes": {"type": "array", "items": {"type": "string"}, "description": "--filler --transcribe under --engine auto: present when the English-only Parakeet model ran on English assumed (no --filler-lang, no language detected, no Whisper engine installed or none that succeeded); the transcript is wrong if the speech is not English"}}
@@ -596,7 +622,8 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
                  "sources": {"type": "array", "description": "1.18: [{path, offset_s, confidence, drift_ppm}], one per SOURCE; the only per-source shape once more than one SOURCE is given; with --fix-drift each also carries drift_skipped_reason"},
                  "drift_skipped_reason": {"type": ["string", "null"], "enum": ["too_short", "low_confidence", None], "description": "--fix-drift, one SOURCE: why the drift correction was not applied (too_short: no tail window far enough from the head; low_confidence: the tail did not correlate), null when it was; also a diagnostics.skipped entry, drift_correction_skipped"}}
     elif name == "look":
-        extra = {"outputs": {"type": "array", "items": {"type": "string"}}}
+        extra = {"outputs": {"type": "array", "items": {"type": "string"}},
+                 "guides": {"type": "array", "description": "--guides only: each outline drawn on the PNG, {guide: action|title, fraction (0.93 / 0.90 of the frame, SMPTE ST 2046-1), of: frame} or {guide: 4:3, window, action: 0.90, title: 0.80}; drawn on the preview only"}}
     elif name == "render":
         extra = {"stages": {"type": "array", "items": {"type": "string"}}, "check": {"type": ["object", "null"], "description": "check.py's document for a \"check\" stage with a platform, \"content\": true, or both; when check.py printed none, a failure document with error.reason check_output_unparsed"},
                  "cache": {"type": ["object", "null"], "description": "--cache: {dir, ffmpeg, hits, misses, miss_reasons: [{stage, reason: not_cached|sidecar_missing|artifact_missing|sidecar_corrupt|artifact_truncated|no_output_path, ...}], saved_seconds, entries, would_hit (--dry-run)}"},
@@ -626,14 +653,19 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
     elif name == "export":
         extra = {"repair": {"type": "object", "description": "--repair (2.24): {before, after}, each {timestamp_warnings, decode_errors} counted over one full decode at -v warning"},
                  "loudness": {"type": "object", "description": "platform presets with audio: the written file's lufs/tp against the platform's target_lufs/target_tp, ok true when inside the spec; normalized true when --normalize ran loudness.py on the file; silent true (lufs \"-inf\", ok false, no normalize) when the written audio is silent; measured false (lufs, tp and ok null, reason not_measured) when the measurement could not be read"},
+                 "alpha_mode": {"enum": ["straight", "premultiplied"], "description": "alpha presets only (prores4444, prores4444xq, qtrle, vp9-alpha, hap-alpha): how the colour was written, from --alpha-mode (default straight). The `alpha` verification step compares the written file's alpha with the source's frame by frame, tolerance 2 of 255 per frame (comparison: {ok, paired, worst_delta, worst_frame}; with a different frame count the mean and the most transparent frame, paired false; frames: {expected, measured}, each {mean, min, frames}); `codec` compares the written codec and profile with the preset's"},
+                 "key": {"type": "object", "description": "--preset key-fill only: the key file {output (<out stem>_key.mov), identity, sha256, timecode (the source's start timecode written on both, or null)}. Verification adds key_fill_pair (width, height, frame count, rate and the video streams' lengths equal on both files) and key_level (the key's level against the source's alpha frame by frame, tolerance 2 of 255); the source's subtitle/data streams are not written (non_av_streams.dropped, reason key_fill)"},
+                 "fill_sha256": {"type": "string", "description": "--preset key-fill only: the fill file's SHA-256 (the key's is key.sha256)"},
                  "trimmed": {"type": "object", "description": "present when the source was longer than the preset's platform maximum and the export was cut to it (no --allow-long): {from, to} in seconds; notes says so too"},
-                 "non_av_streams": {"type": "object", "description": "the source's subtitle and data streams: {kept: [{type: subtitle|data, index (n-th of its type), codec, language (subtitle), output_codec}], dropped: [{type, index, codec, language, reason: write_failed|gif|not_in_output}]}, read back from the written file (under --dry-run, as planned). A subtitle track is copied when the container holds it as it is, else converted to the container's text track (mov_text in .mp4/.mov, SubRip in .mkv); a trimmed export cuts it at the same point. Both lists are empty for a source with neither"},
+                 "non_av_streams": {"type": "object", "description": "the source's subtitle and data streams: {kept: [{type: subtitle|data, index (n-th of its type), codec, language (subtitle), output_codec}], dropped: [{type, index, codec, language, reason: write_failed|gif|key_fill|not_in_output}]}, read back from the written file (under --dry-run, as planned). A subtitle track is copied when the container holds it as it is, else converted to the container's text track (mov_text in .mp4/.mov, SubRip in .mkv); a trimmed export cuts it at the same point. Both lists are empty for a source with neither"},
                  "dropped_non_av_streams": {"type": "boolean", "description": "true when non_av_streams.dropped is not empty; a notes line says so too"},
                  "notes": {"type": "array", "items": {"type": "string"}}}
     elif name == "loudness":
         extra = {"measured": {"type": "object", "description": "the loudnorm measurement of the input (input_i, input_tp, input_lra, input_thresh, target_offset); with --measure-only it is the whole result"},
                  "targets": {"type": "object", "description": "the requested lufs / tp / lra"},
-                 "result": {"type": "object", "description": "the written file measured again (input_i, input_tp, input_lra, ...), plus tp_ceiling_used, audio_bitrate_used and encodes"}}
+                 "result": {"type": "object", "description": "the written file measured again (input_i, input_tp, input_lra, ...), plus tp_ceiling_used, audio_bitrate_used and encodes"},
+                 "versions": {"type": "array", "description": "--versions only (output is then null): one row per target, {target, output, targets, result}; every row's loudness and duration steps are in verification with a `version` key, and verified is true only when every version met its own target"},
+                 "outputs": {"type": "array", "items": {"type": "string"}, "description": "--versions only: the files written, in the order asked"}}
     elif name == "color":
         extra = {"dropped_non_av_streams": {"type": "boolean"},
                  "sdr_path": {"enum": ["tonemap", "gamut"], "description": "--to-sdr only: tonemap for PQ / HLG / Dolby Vision (and --force on an untagged file); gamut for BT.2020 primaries on an SDR transfer, converted to BT.709 without a tone map"},
@@ -642,9 +674,22 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
                  "measurements": {"type": "object", "description": "--correct only: signalstats levels of input and output"}}
     elif name == "loop":
         extra = {"boomerang": {"type": "boolean", "description": "--boomerang: frames 0..N-1 then N-2..1, repeated, so neither turnaround frame is shown twice"},
+                 "crossfade": {"type": "number", "description": "--crossfade only: the fade used, in seconds, rounded to whole frames; one repeat is the clip minus this"},
+                 "expected_duration": {"type": "number", "description": "seconds requested: --duration, or --times x one repeat (the clip, the clip minus the crossfade, or a boomerang round trip); the duration verification step compares the file against it within 1.5 frames"},
+                 "seam": {"type": "object", "description": "not with --boomerang: the first seam of the written file measured (at: between_repeats, or end_to_start for one repeat; time; video_step and video_typical_step, the mean luma change across the seam and the median one between neighbouring frames on a 64x36 grey copy, 0-255; audio_level_step_db, the RMS level 20 ms after the seam minus 20 ms before). A measurement, not a pass/fail: a step far above the typical one is a visible jump"},
                  "notes": {"type": "array", "items": {"type": "string"}, "description": "--boomerang on a source with audio: the audio was dropped"}}
     elif name == "cut":
         extra = {"expected_duration": {"type": "number", "description": "seconds requested"},
+                 "mode": {"enum": ["copy", "hybrid", "accurate"], "description": "copy: nothing re-encoded at any stage, the join included; accurate: --accurate was asked for or forced; hybrid: asked for lossless but a segment or the join re-encoded anyway (reencode_reason says why)"},
+                 "requested_start": {"type": ["number", "null"], "description": "one segment: the requested start, clamped to the media's duration (null for --segments)"},
+                 "requested_end": {"type": ["number", "null"], "description": "one segment: the requested end, clamped to the media's duration (null for --segments)"},
+                 "requested_segments": {"type": ["array", "null"], "description": "--segments: [[start, end], ...] requested, clamped to the media's duration (null for one segment)"},
+                 "requested_duration": {"type": "number", "description": "the requested length, as expected_duration"},
+                 "output_duration": {"type": ["number", "null"], "description": "the written file's length, measured (null under --dry-run)"},
+                 "duration_delta_seconds": {"type": ["number", "null"], "description": "output_duration minus requested_duration (null under --dry-run)"},
+                 "nearest_keyframes": {"type": ["array", "null"], "description": "the keyframes within 5 s of a start whose stream copy snapped past --tolerance and was re-encoded (null otherwise)"},
+                 "snap": {"type": ["object", "null"], "description": "--snap beats: {mode, tolerance, confidence, tempo_bpm, grid, grid_points, moved, snapped, unchanged, source}; null otherwise"},
+                 "dropped_audio_streams": {"type": "integer", "description": "audio tracks of the source this cut did not write (cut writes one, on a stream copy as on a re-encode); 0 for a source with one or none. A notes line and an audio_tracks_dropped warning say so too"},
                  "duration_error_ms": {"type": ["number", "null"], "description": "written minus requested, measured by ffprobe (null under --dry-run)"},
                  "precision": {"enum": ["packet", "sample", "codec_frame", "frame"],
                                "description": "since 3.0.0 the least exact segment's (as least_exact_precision; 2.x: the whole run's, packet only when nothing re-encoded): packet: stream copy on a packet/keyframe boundary; sample: decoded audio trimmed to the sample, lossless output; codec_frame: sample-trimmed then framed by a lossy encoder (priming delay adds to the length); frame: re-encoded video"},
@@ -689,6 +734,8 @@ def output_schema(name: str, meta: Dict[str, Any], hw: bool = False) -> Dict[str
                  "audio": {"type": "object", "description": "what the mix was built from: voice (null | light | medium | strong), stereo_widen, effects/effects_volume, and with --music the music_volume plus duck (null when --duck was not given, else the threshold in dB and linear, ratio, attack_ms, release_ms, amount_db actually used)"}}
     if name in ("overlay", "graphics", "caption", "grid"):
         extra["font_used"] = FONT_USED_SCHEMA
+    if name in NON_AV_STREAM_TOOLS and "dropped_non_av_streams" not in extra:
+        extra["dropped_non_av_streams"] = {"type": "boolean", "description": "true when the source's subtitle or data streams are not in the output: either the run leaves them out by design (a path whose output they would no longer match, such as speedramp.py's, join.py's or freeze.py's), or they could not be copied and the encode ran again without them (then a non_av_streams_dropped fallback says why); export.py's non_av_streams lists them"}
     if name == "cropdetect":
         extra.update({"windows": {"type": "integer", "description": "sampled windows (--samples)"},
                       "windows_failed": {"type": "integer", "description": "windows ffmpeg could not decode and that were skipped (a cropdetect_windows_failed warning when > 0); every window failing is a kind ffmpeg failure"}})

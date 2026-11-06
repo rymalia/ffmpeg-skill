@@ -58,10 +58,12 @@ import tempfile
 import zlib
 from typing import List, Tuple
 
+from _common.runner import fail_if_classified
 from _common import (beat_grid, snap_points, decode_pcm_mono, rms_envelope, BEAT_MIN_CONFIDENCE)
 from _common import require_tool
 from _common.probe import TS_EXTS, signatures_match, stream_signature
-from _common import sibling_temp, source_codec_video_args, STATE, add_common, apply_common, audio_codec_for, emit, aac_args, cfr_args, default_output, die, ffmpeg_base, info, is_audio_output, time_arg, probe, run, X264_PRESETS, keyframes_near, MissingFpsError, concat_list_line, place_output, refuse_output_is_input, fmt_secs, measure_frame_timing, dry_run_input_pending
+from _common.decision import grid_at_or_after
+from _common import warn, sibling_temp, source_codec_video_args, STATE, add_common, apply_common, audio_codec_for, emit, aac_args, cfr_args, default_output, die, ffmpeg_base, info, is_audio_output, time_arg, probe, run, X264_PRESETS, keyframes_near, MissingFpsError, concat_list_line, place_output, refuse_output_is_input, fmt_secs, measure_frame_timing, dry_run_input_pending
 
 # outputs whose re-encode dropped a subtitle/data stream (reported as dropped_non_av_streams)
 DROPPED_STREAMS: List[str] = []
@@ -892,6 +894,7 @@ def cut_one(src: str, start: float, end: float, dst: str, reencode: bool, crf: i
     proc = run(cmd, check=False)
     if proc.returncode != 0:
         if not reencode:
+            fail_if_classified(proc)  # a full disk fails the re-encode too: its error, not a retry (#415)
             info("stream copy failed, falling back to re-encode")
             return cut_one(src, start, end, dst, True, crf, preset, tolerance, meta, reasons + ["copy_failed"], edit_list_ok)
         die(f"ffmpeg failed:\n{proc.stderr.strip()}", kind="ffmpeg")
@@ -1013,10 +1016,9 @@ def _fraction_rate(text: str) -> float:
     return float(num) / float(den or 1)
 
 
-def _grid_at_or_after(t: float, v0: float, rate: float) -> float:
-    """The time of the first frame at or after `t` on a constant-rate grid starting at `v0`."""
-    import math
-    return v0 + math.ceil((t - v0) * rate - 1e-6) / rate
+# the first frame at or after t on the source's grid; shared with the tools that cut both streams
+# on one set of bounds (#409)
+_grid_at_or_after = grid_at_or_after
 
 
 def _join_chunk(src: str, segments: List[Tuple[float, float]], dst: str, meta: dict, crf: int, preset: str,
@@ -1604,6 +1606,7 @@ def main() -> int:
                         cmd += ["-movflags", "+faststart"]
                     cmd += [joined]
                     proc = run(cmd, check=False)
+                    fail_if_classified(proc)  # #415: a full disk is not a reason to re-cut every segment
                     if proc.returncode != 0:
                         info("concat with stream copy failed; re-cutting every segment from the source into one re-encode")
                         compatible = False
@@ -1706,9 +1709,20 @@ def main() -> int:
     # selection writes one of each, so that is the count; the source's own picture/sound gap is
     # the reference for the lengths check
     expect_streams = {"video": int(bool(meta.get("video")) and not is_audio_output(output)), "audio": int(bool(meta.get("audio")))}
+    # cut writes one audio track (ffmpeg's default selection, on a stream copy as on a re-encode):
+    # a source with more must say which ones did not come along (#397), as export.py's non_av_streams does
+    src_audio = meta.get("audio_streams") or []
+    out_audio = (result.get("audio_streams") or []) if not STATE.dry_run else src_audio[:1]
+    dropped_audio = len(src_audio) - len(out_audio) if src_audio else 0
+    if dropped_audio > 0:
+        kept = len(out_audio)
+        msg = (f"the source has {len(src_audio)} audio tracks; this cut kept {kept} and left {dropped_audio} out "
+               f"(cut writes one audio track, on a stream copy as on a re-encode)")
+        warn(msg, "audio_tracks_dropped", source=len(src_audio), kept=kept, dropped=dropped_audio)
+        notes.append(msg)
     emit(output, expected_duration=round(expected, 6), duration_error_ms=error_ms, precision=precision, reencoded=reencoded,
          expect_streams=expect_streams, stream_reference=[meta], stream_windows=[(s, e) for s, e in requested],
-         dropped_non_av_streams=bool(DROPPED_STREAMS),
+         dropped_non_av_streams=bool(DROPPED_STREAMS), dropped_audio_streams=max(dropped_audio, 0),
          requested_start=round(requested[0][0], 6) if len(requested) == 1 else None,
          requested_end=round(requested[0][1], 6) if len(requested) == 1 else None,
          requested_segments=[[round(s, 6), round(e, 6)] for s, e in requested] if len(requested) > 1 else None,

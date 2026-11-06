@@ -21,7 +21,7 @@ The contract is derived from the code that runs, not maintained beside it:
 | Field | Meaning | Changes when |
 |---|---|---|
 | `contract_version` | shape of this document (`2.0`) | a key is renamed, removed or changes meaning |
-| `skill.version` | the npm / package.json version (`3.1.1`) | any release |
+| `skill.version` | the npm / package.json version (`3.2.0`) | any release |
 
 A release that adds a tool or a flag keeps `contract_version`; a breaking change to the
 ToolSpec shape bumps it. Consumers pin on `contract_version` and read `skill.version`
@@ -149,7 +149,7 @@ JSON would have been rewritten for that. The flat keys, typed per tool in `outpu
   "deprecated": [],
   "removed": [{"what": "...", "since": "1.10.0", "replacement": "...", "removed_in": "2.0.0", "where": "cli | json | mcp | behaviour"},
               {"what": "running on FFmpeg 5.x (the requirements.ffmpeg floor)", "since": "2.14.0", "replacement": "FFmpeg 6.1 or later; ...", "removed_in": "3.0.0", "where": "behaviour"}],
-  "skill": {"id": "ffmpeg-skill", "version": "3.1.1", "execution_mode": "local", "kind": "execution",
+  "skill": {"id": "ffmpeg-skill", "version": "3.2.0", "execution_mode": "local", "kind": "execution",
             "entrypoints": {"cli": "...", "mcp": "...", "contract": "...", "doctor": "..."},
             "not_provided": ["AI reasoning", "decisions", "production plans", "project IR", "approvals", "network access", "transcription engine"]},
   "requirements": {"python": ">=3.10 (standard library only)", "ffmpeg": ">=6.1", "ffprobe": ">=6.1"},
@@ -203,6 +203,11 @@ One entry per tool under `tools`, sorted by id. Tool ids are stable:
 | `analysis_and_execution` (measures by default or with a flag, can also write) | silence (`--list`), loudness (`--measure-only`), sync (offset JSON without `-o`) |
 | `execution` (writes a new artifact) | cut, fit, caption, overlay, graphics, multicam, audio, join, color, export, render, batch |
 | `verification` (checks or shows an artifact) | check, look, verify, report |
+
+`batch` writes one artifact per input only when a recipe step names `{out}` (or the recipe is a
+render project): a recipe in which no step does (a QC pass of `check.py`/`probe.py`) writes none,
+and each `results` row carries `written: false` beside its usual `output` path, which stays a
+string (#415).
 
 ### Verification policy
 
@@ -596,14 +601,20 @@ line to one screen width; a longer explanation, and the per-script files, are `-
 Japanese or Korean.
 
 Since 1.15 `fonts` also carries `emoji`: `{"mode": "color"|"png"|"mono"|"none", "color_font": "Noto
-Color Emoji"|null, "color_font_file": "..."|null, "libass_color": true|false|null, "assets":
+Color Emoji"|null, "color_font_file": "..."|null, "libass_color": true|false|null, "libass_glyph": true|false|null, "assets":
 "/path"|null, "detail": "...", "fix": "..."}`. `libass_color` comes from a **render probe** — one
 64x64 frame with an emoji cue through `subtitles=`, chroma-tested — because an installed colour
 emoji family proves nothing: Noto Color Emoji installs cleanly on builds whose libass still draws a
 monochrome outline. `null` means the probe was not run: `contract --json --static` (and every other
 static/JSON-only path) skips it, exactly as it skips the rest of the environment detection. `mode`
 is `color` when the probe says colour, else `png` when an emoji assets directory resolves, else
-`mono` when some installed face has a glyph, else `none`. Informational like the rest of `fonts`:
+`mono` when some installed face has a glyph, else `none`. Since 3.1.2 `libass_glyph` asks a second
+question when there is no colour: does libass draw an emoji glyph at all, or only what it draws for
+U+10FFFD, a code point no font has (the empty `.notdef` box Apple Color Emoji gives libass on macOS)?
+`false` makes `mode` `none` (`png` when an emoji assets directory resolves: the PNG route draws
+them). `caption.py --emoji mono` (which never uses assets) then refuses (`kind: input`) rather than
+burn empty boxes; `--emoji auto` leaves the emoji out of the drawn text, as with no emoji face at all,
+and says so (warning `emoji_not_drawn`). A `--fonts-dir` is searched by the probe too. Informational like the rest of `fonts`:
 it never moves `ok` or any tool's `usable`.
 
 `caption.py`, `graphics.py` and `overlay.py` gained `--emoji auto|color|png|mono|none`,
@@ -769,6 +780,16 @@ the track gone and nothing in the result saying so):
 | `non_av_streams` | `export.py` | the source's subtitle and data streams: `{kept: [{type, index, codec, language, output_codec}], dropped: [{type, index, codec, language, reason}]}` (`index` is the n-th stream of its type; `language` on subtitles). Read back from the written file; under `--dry-run`, as planned. A subtitle track is copied when the container holds it, else converted to the container's text track (`mov_text` in .mp4/.mov, SubRip in .mkv); a platform trim cuts it with the picture. `reason`: `write_failed` (the attempt that mapped it failed and the encode ran again without it; the error is in its `non_av_streams_dropped` fallback, whose `dropped` says data alone first, then subtitles too), `gif`, `not_in_output` |
 | `dropped_non_av_streams` | `export.py` | `true` when `non_av_streams.dropped` is not empty (a `notes` line too), as on the tools that use `run_keeping_subtitles()` |
 
+Keys added after 3.1.8, additive (delivery masters and versions, #417-#423):
+
+| key | tool | what it holds |
+|---|---|---|
+| `alpha_mode`; `verification[]` steps `codec`, `alpha` | `export.py` alpha presets (`prores4444`, `prores4444xq`, `qtrle`, `vp9-alpha`, `hap-alpha`); `codec` also on `prores` and `dnxhr-*` | `alpha_mode`: `straight` or `premultiplied` (`--alpha-mode`). `codec`: the written codec, profile and pixel format against the preset's. `alpha`: the written file's alpha against the source's frame by frame (the mean alpha of a 64x36 copy of each frame), each within 2 of 255 (`comparison: {ok, paired, worst_delta, worst_frame}`; with a different frame count, a conformed variable-rate source, the mean and the most transparent frame, `paired: false`; `frames: {expected, measured}`, each `{mean, min, frames}`). A source without alpha is refused; a dry run decides on the pixel format and a VP9 stream's `alpha_mode` tag without decoding. A VP9 source is decoded with libvpx-vp9, and these presets stay on the CPU under `--hw` (a note says so) |
+| `key`, `fill_sha256`; steps `key_fill_pair`, `key_level` | `export.py --preset key-fill` | the key file `{output (<out stem>_key.mov), identity, sha256, timecode}` and the fill's SHA-256. `key_fill_pair`: width, height, frame count, rate and the video streams' lengths equal on both; `key_level`: the key's level against the source's alpha over every frame. Both paths are guarded as outputs (not the input, not an existing file without `--overwrite`); the source's subtitle/data streams are reported in `non_av_streams.dropped` with `reason: key_fill`. `--max-mb` is refused |
+| `versions`, `outputs` | `loudness.py --versions` | one row per target `{target, output, targets, result}` (top-level `output` is null) and the files written; each version's `loudness` and `duration` steps carry `version`, and `verified` holds only when every version met its own target. An empty list is refused; a `--plan` path that is one of the version files is refused (`output_path_taken`) |
+| `crossfade`, `expected_duration`, `seam` | `loop.py` | `crossfade`: the fade in seconds, whole frames; `expected_duration`: the length asked for, checked by the `duration` step within 1.5 frames; `seam`: the first seam measured (`video_step` against `video_typical_step`, `audio_level_step_db`) |
+| `guides` | `look.py --guides` | each outline drawn on the PNG (`action` 0.93, `title` 0.90 of the frame, or the `4:3` centre cut with its own); a frame (either clip under `--compare`) no wider than 4:3 refuses `4:3` |
+
 Per-tool keys added after 2.10.11 ("nothing happens silently"), all additive:
 
 | key | tool | what it holds |
@@ -780,8 +801,10 @@ Per-tool keys added after 2.10.11 ("nothing happens silently"), all additive:
 | `matched_untimed`, `matched_too_long` | `silence.py --filler` (inside `filler`) | listed words that were not cut: no usable timing in the transcript (also a `filler_words_untimed` warning), or longer than a filler (`FILLER_MAX_WORD`, a held vowel) |
 
 `caption.py --transcribe` and `silence.py --filler --transcribe`: when a local speech engine ran
-and produced no cue, the refusal is `"<engine> found no speech in <input>"` with `kind: input`,
-`reason: "no_speech"` and `engine` in the failure document — distinct from the "no local
+and produced no cue (for `--filler`: a Whisper transcript with no text at all; text without word
+timings is a build without them, refused as such), the refusal is `"<engine> found no speech in
+<input>"` with `kind: input`, `reason: "no_speech"` and `engine` in the failure document (the
+three ASR reasons below are in `error.reason` too, with `error.details`) — distinct from the "no local
 speech-to-text engine found" refusal, which now only means no engine was found. When `--engine
 auto` found engines and none transcribed, the refusal is `kind: input` with `reason:
 "engine_failed"` (one ran and failed) or `"english_only"` (the only engines found were Parakeet
@@ -859,8 +882,9 @@ A refusal also carries `error.reason`, a stable snake_case code for *why*
 `output_is_directory`, `output_dir_missing`, `output_dir_not_writable`, `output_locked`,
 `media_path_is_url`, `media_path_is_playlist` (an HLS or ffconcat playlist given as media),
 `output_looks_like_option` (an output starting with `-`, other than `-` for stdout), `output_path_taken` (two files one run writes share a path), `media_path_not_a_file` (a FIFO or device as input), `silence.py --timemap`'s `timemap_path_taken`, `join.py --copy`'s `join_copy_mismatch`,
-`render.py`'s `plan_*` reasons, and `--codec av1`/`prores`'s `encoder_missing` and
-`encoder_list_unreadable`), and `error.details`, the facts the message is written from, so a
+`render.py`'s `plan_*` reasons, `--codec av1`/`prores`'s `encoder_missing` and
+`encoder_list_unreadable`, and `--transcribe`'s `asr_engine_missing`, `no_speech`, `engine_failed`
+and `english_only`), and `error.details`, the facts the message is written from, so a
 caller never parses the prose:
 
 ```
@@ -873,6 +897,14 @@ caller never parses the prose:
 A tool that runs another (`render.py` stages and plans) forwards the child's `reason` and
 `details` in its own `error`. Both are absent on a failure that is not a refusal, like `hint`.
 
+A `timeout` or `interrupted` failure exits 124, or 130/143, whether the tool or a child tool it ran
+was stopped (`export.py --normalize`'s loudness pass, `render.py`'s stages, check, executed plan and
+pack destinations, `waveform.py`'s title and captions pass the child's code on). Its message ends "nothing was written" only when
+that is so: once a tool has written its deliverable and runs a further step on it
+(`export.py --normalize`, `render.py`'s chapters and check stages), the message names the file,
+says it is kept without the step that was stopped, and the document carries it as `output`
+(3.1.6, #415).
+
 **Diagnostics.** What a run decided on its own -- a warning, a fallback it took, a step it
 skipped -- is recorded as it happens (a stderr line too) and lands in the document as
 `diagnostics: {warnings, fallbacks, skipped}`, each entry `{code, message, ...facts}`; it is
@@ -880,7 +912,8 @@ present on success and failure documents alike, only when one list is not empty,
 `render.py` stage reported carries `stage`. `contract --json` → `json_output.diagnostic_codes`
 lists every code with its bucket and meaning (a test reads every `warn()`/`record_fallback()`/
 `record_skip()` call against it). Among them: the runner's `odd_dimensions_scaled_even` (an encode
-re-run with an even scale; the frame loses a row or column), `non_av_streams_dropped` (with the
+re-run with an even scale, or broll.py's odd-sized A-roll scaled even up front; the frame loses a
+row or column), `non_av_streams_dropped` (with the
 first attempt's error beside `dropped_non_av_streams`), `measurement_input_pending` (skipped: a
 dry-run measurement of an earlier stage's output), `ffmpeg_list_unreadable` (`ffmpeg -encoders` or
 `-bsfs` could not be read; what needed it names the read failure, not a missing encoder) and

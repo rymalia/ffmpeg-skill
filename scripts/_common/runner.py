@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
 INSTALL_HINTS = {
@@ -108,6 +108,13 @@ _FFMPEG_VERSION: "Optional[Tuple[int, int]]" = None
 _FFMPEG_VERSION_IS_RELEASE = False   # ffmpeg_version() read a release number, not the libavutil major
 
 
+def _probe_limit() -> float:
+    """The ceiling for a short read-only ffprobe/ffmpeg query run outside run(): PROBE_TIMEOUT, or
+    the caller's --timeout when that is lower (#415). Never unlimited: a version or stream-list read
+    that hangs is a stall, whatever --timeout 0 asks of the encodes."""
+    return min(PROBE_TIMEOUT, STATE.timeout) if STATE.timeout else PROBE_TIMEOUT
+
+
 def ffmpeg_version() -> "Tuple[int, int]":
     """(major, minor) of the FFmpeg build on PATH, parsed once from `ffprobe -version`; (0, 0)
     when it cannot be read. ffprobe rather than ffmpeg because --dry-run promises never to run
@@ -120,7 +127,7 @@ def ffmpeg_version() -> "Tuple[int, int]":
         _FFMPEG_VERSION = (0, 0)
         try:
             out = subprocess.run([found_exe("ffprobe"), "-version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                 timeout=PROBE_TIMEOUT).stdout
+                                 timeout=_probe_limit()).stdout
             m = re.search(r"ffprobe version\s+n?(\d+)\.(\d+)", out)
             if m:
                 _FFMPEG_VERSION = (int(m.group(1)), int(m.group(2)))
@@ -158,7 +165,7 @@ def ffmpeg_release() -> "Optional[Tuple[int, int, int]]":
         _FFMPEG_RELEASE_READ = True
         try:
             out = subprocess.run([found_exe("ffprobe"), "-version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                 timeout=PROBE_TIMEOUT).stdout
+                                 timeout=_probe_limit()).stdout
             m = re.search(r"ffprobe version\s+n?(\d+)\.(\d+)(?:\.(\d+))?", out)
             if m:
                 _FFMPEG_RELEASE = (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
@@ -311,6 +318,7 @@ CODECS = ("h264", "hevc", "av1", "prores")
 
 _ENCODERS: Optional[set] = None
 _BSFS: Optional[set] = None
+_FILTERS: Optional[set] = None
 
 
 class Context:
@@ -323,7 +331,8 @@ class Context:
 
     __slots__ = ("dry_run", "json", "json_brief", "progress", "fast", "duration_hint", "commands", "timeout", "overwrite", "written", "preexisting", "plan", "plan_written", "plan_inputs", "codec",
                  "hw", "hw_source", "hw_notes", "hw_swaps", "hw_fallback", "hw_env_ignored", "hw_stages", "hw_auto",
-                 "notes", "warnings", "fallbacks", "skipped", "audit_log", "stage_verification")
+                 "notes", "warnings", "fallbacks", "skipped", "audit_log", "stage_verification", "first_input", "audio_inputs", "video_inputs",
+                 "source_timecode", "smpte_hint", "delivered")
 
     def __init__(self) -> None:
         self.reset()
@@ -331,6 +340,12 @@ class Context:
     def reset(self) -> None:
         self.dry_run = False      # print ffmpeg commands, run nothing (ffprobe still runs)
         self.json = False         # emit() prints a JSON document instead of the output path
+        self.first_input = None   # (path, audio track count) of the first input probed: emit() reports tracks the output left out
+        self.video_inputs = set()  # real paths of the inputs probed that have a picture: with two or more, which one the output shows is the tool's choice (sync --trim-second, a join)
+        self.source_timecode = None  # (start timecode, duration) of the first input probed that carries one (time_arg's SMPTE hint)
+        self.smpte_hint = None    # what die() says when an hh:mm:ss:ff flag read past the end looks like a source timecode (#411)
+        self.delivered: List[str] = []  # deliverables written before a later step (export --normalize, render's chapters/check): a stop then keeps them (#415)
+        self.audio_inputs = set()  # real paths of the inputs probed that have sound: with two or more, whose tracks an output should keep is the tool's choice (grid --audio-from, a mix)
         self.json_brief = False   # --json-brief: the same document trimmed to the fields a caller acts on
         self.progress = False     # run() streams percent / ETA to stderr for ffmpeg
         self.fast = False         # x264 preset forced to veryfast
@@ -437,6 +452,13 @@ def apply_common(args: "argparse.Namespace") -> None:
     STATE.progress = bool(getattr(args, "progress", False))
     STATE.fast = bool(getattr(args, "fast", False))
     STATE.overwrite = bool(getattr(args, "overwrite", False))
+    if STATE.plan:
+        # the plan is a file this run writes itself: the side-file guards apply (#408), so it
+        # never replaces an input, the output or an existing file without --overwrite
+        named = [getattr(args, k, None) for k in ("input", "inputs", "reference", "compare")]
+        inputs = [p for v in named for p in (v if isinstance(v, (list, tuple)) else [v]) if isinstance(p, str)]
+        out = getattr(args, "output", None)
+        guard_sidecar(STATE.plan, *inputs, siblings=(out,) if isinstance(out, str) else ())
     if getattr(args, "timeout", None) is not None:
         STATE.timeout = max(0.0, float(args.timeout))
     else:
@@ -519,12 +541,52 @@ def stop_children() -> None:
     _CHILDREN.clear()
 
 
+def mark_delivered(path: str) -> None:
+    """Record that this run has written its deliverable and still has a step to run on it (export's
+    --normalize, render's chapters and check stages): a timeout or an interrupt from then on says the
+    file is there and kept, instead of "nothing was written" (#415)."""
+    if path and path not in STATE.delivered:
+        STATE.delivered.append(path)
+
+
+def child_exit_code(doc: Any, returncode: Optional[int]) -> int:
+    """The exit code a tool passes on from a child tool that failed: the code its document states,
+    else its process's own, else 1. A child killed by a signal has a negative returncode (-9), which
+    as an exit code wraps (247); it is passed on as the shell reports it, 128 + the signal (137)."""
+    code = (doc.get("exit_code") if isinstance(doc, dict) else None) or returncode or 1
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return 1
+    return 128 - code if code < 0 else code
+
+
+def kept_deliverables() -> List[str]:
+    """The deliverables mark_delivered() named that are on disk."""
+    return [p for p in STATE.delivered if os.path.isfile(p)]
+
+
+def kept_clause() -> str:
+    """How a stopped run's message ends: "nothing was written", or which deliverable it had already
+    written and keeps (not the finished result: the step that was stopped did not run on it)."""
+    kept = kept_deliverables()
+    if not kept:
+        return "nothing was written"
+    return (f"{', '.join(kept)} had already been written by this run and {'is' if len(kept) == 1 else 'are'} kept, "
+            "without the step that was stopped (pass --overwrite to make it again)")
+
+
+def _kept_fields() -> Dict[str, Any]:
+    kept = kept_deliverables()
+    return {"output": kept[-1]} if kept else {}
+
+
 def _on_signal(signum: int, frame: Any) -> None:
     import signal as _signal
     name = {getattr(_signal, "SIGINT", None): "SIGINT", getattr(_signal, "SIGTERM", None): "SIGTERM"}.get(signum, str(signum))
     stop_children()
-    die(f"interrupted by {name}: the running command was stopped and its partial output removed; nothing was written",
-        code=128 + signum, kind="interrupted")
+    die(f"interrupted by {name}: the running command was stopped and its partial output removed; {kept_clause()}",
+        code=128 + signum, kind="interrupted", **_kept_fields())
 
 
 def install_signal_handlers() -> None:
@@ -679,11 +741,15 @@ def video_encoder_of(cmd: Sequence[str]) -> Optional[str]:
 # while every guard here reads it as a path. Two or more letters, so a Windows
 # drive letter (`C:\x.mp4`) is a path; `pipe:` is the skill's own stdout/stdin and stays allowed.
 _URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
+# Off Windows there are no drive letters, and ffmpeg reads a one-letter `x:y.mp4` as protocol `x`
+# too (#408: it then failed as "Protocol not found", with no hint that ./x:y.mp4 works)
+_URL_SCHEME_POSIX = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 def looks_like_url(value: str) -> bool:
     """True for a value ffmpeg would open through a protocol rather than as a local file."""
-    return bool(_URL_SCHEME.match(value)) and not value.startswith("pipe:")
+    scheme = _URL_SCHEME if os.name == "nt" else _URL_SCHEME_POSIX
+    return bool(scheme.match(value)) and not value.startswith("pipe:")
 
 
 _PLAYLIST_SUFFIXES = (".m3u8", ".m3u", ".ffconcat")
@@ -877,10 +943,13 @@ class _OutputLock:
     the hour ran from the lock's creation, so a legitimate run longer than an hour lost its lock
     to a second writer. A takeover is recorded (`diagnostics.fallbacks`, stderr, and the audit
     log); so is running without a lock where none can be created (`diagnostics.warnings`)."""
-    def __init__(self, output: str) -> None:
+    def __init__(self, output: str, on_locked: "Optional[Callable[[str, str, Dict[str, Any]], None]]" = None) -> None:
+        # on_locked(message, hint, details): a caller that must not exit (batch.py's item worker)
+        # raises its own error for a held lock instead of the refusal below
         self.path: Optional[str] = None
         self.fd: Optional[int] = None
         self.output = output
+        self.on_locked = on_locked
         if output == "-" or output.startswith("pipe:") or output.startswith("-"):
             return
         d, base = os.path.split(os.path.abspath(output))
@@ -913,12 +982,14 @@ class _OutputLock:
                         taken = holder
                         continue
                 name = os.path.basename(self.path)[1:-len(".ffskill-lock")]
-                refuse("input", "output_locked",
-                       f"another run is writing {name!r} right now (lock {self.path}"
-                       + (f", pid {holder['pid']}" if holder.get("pid") else "") + "); wait for it or choose a different --output/-o path",
-                       hint=("wait for that run, or choose another -o path; if pid "
-                             f"{holder.get('pid')} is not an ffmpeg-skill run, delete {self.path}"),
-                       lock=self.path, output=os.path.abspath(self.output), **{k: v for k, v in holder.items() if k != "stale"})
+                msg = (f"another run is writing {name!r} right now (lock {self.path}"
+                       + (f", pid {holder['pid']}" if holder.get("pid") else "") + "); wait for it or choose a different --output/-o path")
+                hint = ("wait for that run, or choose another -o path; if pid "
+                        f"{holder.get('pid')} is not an ffmpeg-skill run, delete {self.path}")
+                details = dict(lock=self.path, output=os.path.abspath(self.output), **{k: v for k, v in holder.items() if k != "stale"})
+                if self.on_locked:
+                    self.on_locked(msg, hint, details)
+                refuse("input", "output_locked", msg, hint=hint, **details)
             except OSError as exc:
                 # an unlockable location (a read-only directory surfaces elsewhere): the run goes
                 # on without a lock, and says so -- two runs could now both write this output
@@ -1092,11 +1163,28 @@ def _remember_output(cmd: Sequence[str]) -> None:
         pass
 
 
+def remember_written(*paths: Optional[str]) -> None:
+    """Count files a child tool of this run wrote (render.py's stages, batch.py's steps) as this
+    run's own, as run() counts its ffmpeg outputs: a later stage that replaces one is not refused
+    as replacing someone else's file (#415)."""
+    for path in paths:
+        if path and os.path.isfile(path):
+            try:
+                STATE.written.add(os.path.realpath(path))
+            except OSError:
+                pass
+
+
 def _timed_out(cmd: Sequence[str], seconds: float) -> "None":
     _cleanup_partial_output(cmd)
-    die(f"{os.path.basename(cmd[0])} exceeded the {seconds:.0f} s time limit and was killed; nothing was written. "
-        f"Raise --timeout (or FFMPEG_SKILL_TIMEOUT) if the job is genuinely that long, or check the input for a stall",
-        code=124, kind="timeout")
+    if _is_ffmpeg(cmd) or seconds < PROBE_TIMEOUT:
+        advice = "Raise --timeout (or FFMPEG_SKILL_TIMEOUT) if the job is genuinely that long, or check the input for a stall"
+    else:
+        # a probe's own ceiling, which a higher --timeout does not raise: a read this long is a stall (#415)
+        advice = (f"A probe is limited to {PROBE_TIMEOUT:g} s whatever --timeout says, so this is a stall, not a long "
+                  "job: check that the input is readable (a network share, a file still being written)")
+    die(f"{os.path.basename(cmd[0])} exceeded the {seconds:g} s time limit and was killed; {kept_clause()}. {advice}",
+        code=124, kind="timeout", **_kept_fields())
 
 
 def _stage_existing_output(cmd: Sequence[str]) -> Tuple[List[str], Optional[str], Optional[str]]:
@@ -1428,7 +1516,7 @@ def run_tool(argv: Sequence[str], *, per_call: Optional[float] = None) -> subpro
         child.communicate()
         _unwatch(child)
         name = os.path.basename(str(argv[0]))
-        msg = f"{name} did not finish within {limit:.0f} s (4x the per-ffmpeg --timeout plus 60 s) and was killed"
+        msg = f"{name} did not finish within {limit:g} s (4x the per-ffmpeg --timeout plus 60 s) and was killed"
         doc = {"status": "failed", "exit_code": 124,
                "error": {"kind": "timeout", "message": msg, "code": ERROR_CODE["timeout"], "retryable": ERROR_RETRYABLE},
                "commands": []}
@@ -1461,11 +1549,54 @@ def _has_non_av_streams(cmd: Sequence[str]) -> bool:
     try:
         out = subprocess.run([found_exe("ffprobe"), "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", src],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                             timeout=PROBE_TIMEOUT).stdout
+                             timeout=_probe_limit()).stdout
     except (OSError, subprocess.TimeoutExpired):
         return True
     kinds = {ln.strip() for ln in out.splitlines() if ln.strip()}
     return not kinds or bool(kinds & {"subtitle", "data", "attachment"})
+
+
+def fail_if_classified(proc: subprocess.CompletedProcess) -> None:
+    """Stop with a failed attempt's own error when ffmpeg named a cause a second encode would hit
+    the same way (a full disk, a missing encoder or filter, an unreadable input): the rule
+    run_keeping_subtitles() follows since #389, for every copy-then-re-encode or keep-then-drop
+    fallback (#415). Returns when the failure is unclassified, so the caller's retry runs."""
+    if proc.returncode != 0 and classify_ffmpeg_failure(proc.stderr or ""):
+        _fail(proc.args, proc.returncode, proc.stderr or "")
+
+
+# eia_608 (a QuickTime c608 caption track) decodes to text, so it converts like one (ffmpeg 6.1)
+TEXT_SUBTITLES = frozenset({"mov_text", "subrip", "srt", "ass", "ssa", "webvtt", "text", "eia_608"})
+MP4_FAMILY = frozenset({"mp4", "m4v", "mov"})
+
+
+def subtitle_codec_for(codec: str, out_ext: str) -> str:
+    """The -c:s for one source subtitle stream going into a container with extension `out_ext`
+    (no dot): copy when the container holds it as it is, else the container's own text format --
+    mov_text in MPEG-4, srt in Matroska for a mov_text track, webvtt in WebM. A bitmap track is
+    returned as copy; subtitle_container_holds() says whether that copy can work."""
+    out_ext = out_ext.lstrip(".").lower()
+    if out_ext == "mov" and codec == "eia_608":
+        return "copy"  # QuickTime holds a c608 track as it is; .mp4 has no tag for it
+    if out_ext in MP4_FAMILY and codec in TEXT_SUBTITLES and codec != "mov_text":
+        return "mov_text"
+    if out_ext == "mkv" and codec == "mov_text":
+        return "srt"
+    if out_ext == "webm" and codec in TEXT_SUBTITLES and codec != "webvtt":
+        return "webvtt"
+    return "copy"
+
+
+def subtitle_container_holds(codec: str, out_ext: str) -> bool:
+    """Whether a subtitle stream of `codec` can be written to an `out_ext` container at all,
+    converted by subtitle_codec_for() where it must be: Matroska takes any, MPEG-4 a text track or
+    DVD bitmaps, WebM only text (as WebVTT)."""
+    out_ext = out_ext.lstrip(".").lower()
+    if out_ext in MP4_FAMILY:
+        return codec in TEXT_SUBTITLES or codec == "dvd_subtitle"
+    if out_ext == "webm":
+        return codec in TEXT_SUBTITLES
+    return True
 
 
 def run_keeping_subtitles(cmd: List[str], output: str) -> bool:
@@ -1498,10 +1629,11 @@ def run_keeping_subtitles(cmd: List[str], output: str) -> bool:
 
 
 def _limit_for(cmd: Sequence[str]) -> Optional[float]:
-    """The wall-clock ceiling for this command: ffprobe (and other read-only probes) get a fixed
-    short one, ffmpeg the configured one; None means unlimited."""
+    """The wall-clock ceiling for this command: ffprobe (and other read-only probes) get a short
+    one, PROBE_TIMEOUT or --timeout when that is lower (as _read_ff_list() does: a caller's
+    --timeout 2 bounds every child, #415), ffmpeg the configured one; None means unlimited."""
     if not _is_ffmpeg(cmd):
-        return PROBE_TIMEOUT if STATE.timeout else None
+        return min(PROBE_TIMEOUT, STATE.timeout) if STATE.timeout else None
     return STATE.timeout or None
 
 
@@ -1701,13 +1833,34 @@ def place_output(src: str, dst: str, move: bool = False) -> None:
     _remember_output(cmd)
 
 
+# extensions ffmpeg opens through the image2 demuxer, the only one that expands `%d` in a name
+# and the only one that has a `pattern_type` option (gif, avif, mp4... reject it: "Option
+# pattern_type not found")
+_IMAGE2_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".dpx", ".exr", ".tga",
+               ".ppm", ".pgm", ".pbm", ".pam", ".sgi", ".jp2", ".j2k", ".xbm", ".xpm", ".pcx", ".qoi")
+
+
+def still_input_args(path: str) -> List[str]:
+    """`-pattern_type none` for a still read through image2 whose path has a `%` in it (#408):
+    image2 otherwise reads `logo%d.png` as a numbered sequence and opens `logo1.png`, a file the
+    run's guards and fingerprints never looked at. Empty for every other path, a video or a GIF
+    with a `%` in its name included: their demuxers never expand it and reject the option."""
+    p = str(path)
+    return ["-pattern_type", "none"] if "%" in p and os.path.splitext(p)[1].lower() in _IMAGE2_EXT else []
+
+
 def sibling_temp(dst: str, tag: str) -> str:
     """A hidden path next to `dst`, with its extension (the muxer is chosen by it), for a file
     place_output(..., move=True) renames into place: same directory, so the rename never
     crosses a filesystem."""
     d, base = os.path.split(dst)
     stem, ext = os.path.splitext(base)
-    return os.path.join(d, f".{stem}.ffskill-{tag}-{os.getpid()}{ext}")
+    path = os.path.join(d, f".{stem}.ffskill-{tag}-{os.getpid()}{ext}")
+    n = 1
+    while os.path.lexists(path):  # a leftover of an earlier run with this pid: not ours to replace
+        n += 1
+        path = os.path.join(d, f".{stem}.ffskill-{tag}-{os.getpid()}-{n}{ext}")
+    return path
 
 
 _DRAWTEXT_TMPDIR: "Optional[str]" = None
@@ -1803,6 +1956,40 @@ def ffmpeg_bsfs() -> set:
     return _BSFS
 
 
+def ffmpeg_filters() -> set:
+    """Names from `ffmpeg -filters`, read once, empty when it cannot be read (the reason is kept and
+    recorded as ffmpeg_encoders() keeps it); from ffprobe under --dry-run, for the reason
+    ffmpeg_encoders() gives. The row is recognised by its io-spec token (`V->V`, `|->V`), so the
+    flag-column width of FFmpeg 6/7 (three) and 8+ (two) does not matter."""
+    global _FILTERS
+    if _FILTERS is None:
+        _FILTERS = _read_ff_list("-filters", r"^\s*(?:[A-Z.|]{1,6}\s+)?([A-Za-z0-9_]+)\s+\S*->\S*")
+    return _FILTERS
+
+
+def require_filter(name: str, why: str) -> None:
+    """Refuse before ffmpeg runs (under --dry-run too) when this build has no `name` filter, with
+    the same kind/reason/hint a run that hit "No such filter" gets (#393). A list that could not be
+    read refuses nothing: an unreadable list is not a missing filter (ffmpeg_list_error)."""
+    names = ffmpeg_filters()
+    if not names or name in names:
+        return
+    die(f"this ffmpeg build has no {name} filter, which {why} needs", code=1, kind="ffmpeg",
+        error_extra={"reason": "filter_missing", "details": {"name": name}},
+        hint=filter_missing_hint(name))
+
+
+def filter_missing_hint(name: str) -> str:
+    """The filter_missing hint, with the platform's fuller-build line doctor prints for it."""
+    base = f"this ffmpeg build has no {name} filter: `python3 scripts/_contract.py doctor` lists what it has and how to get a fuller build"
+    system = platform.system()
+    if system == "Darwin":
+        return base + "; on macOS: brew install ffmpeg-full, then put $(brew --prefix ffmpeg-full)/bin first on PATH"
+    if system == "Windows":
+        return base + "; on Windows: winget install Gyan.FFmpeg (the full build)"
+    return base
+
+
 # why the last read of a capability list came back empty: "-encoders"/"-bsfs" -> reason
 _LIST_ERRORS: Dict[str, str] = {}
 
@@ -1812,7 +1999,7 @@ def ffmpeg_list_error(flag: str) -> Optional[str]:
     it was read (or not yet asked for). Only while the cached list is empty: a list a test or a
     later read filled in has nothing to explain."""
     flag = "-" + flag.lstrip("-")
-    cache = _ENCODERS if flag == "-encoders" else _BSFS if flag == "-bsfs" else None
+    cache = {"-encoders": _ENCODERS, "-bsfs": _BSFS, "-filters": _FILTERS}.get(flag)
     return None if cache else _LIST_ERRORS.get(flag)
 
 
@@ -1820,7 +2007,7 @@ def _read_ff_list(flag: str, pattern: str) -> set:
     tool = "ffprobe" if STATE.dry_run else "ffmpeg"
     # --timeout bounds this read too: on Apple Silicon every CPU re-encode asks for the list
     # (#314), so a deadlocked ffmpeg must not outlive the limit the caller set before the encode
-    limit = min(PROBE_TIMEOUT, STATE.timeout) if STATE.timeout else PROBE_TIMEOUT
+    limit = _probe_limit()
     _LIST_ERRORS.pop(flag, None)
     names: set = set()
     why = None
@@ -1838,7 +2025,7 @@ def _read_ff_list(flag: str, pattern: str) -> set:
         why = f"{tool} {flag} could not run: {exc}"
     if why:
         _LIST_ERRORS[flag] = why
-        what = "encoder" if flag == "-encoders" else "bitstream filter"
+        what = {"-encoders": "encoder", "-bsfs": "bitstream filter"}.get(flag, "filter")
         warn(f"could not read this ffmpeg build's {what} list ({why}); nothing that needs it can be confirmed, which is not the same as the build lacking it",
              "ffmpeg_list_unreadable", list=flag.lstrip("-"), tool=tool, error=why)
     return names

@@ -513,7 +513,8 @@ freeze.py INPUT --hold T [--at T] [--mode insert|extend] [-o OUT]
 how long the freeze lasts. `--mode insert` (default) inserts the hold at
 `--at`, pushing everything after it later by `--hold` seconds. `--mode
 extend` only works with `--at` at (or past) the clip's end and just makes
-the last frame last `--hold` seconds longer, with nothing pushed. Audio is
+the last frame last `--hold` seconds longer, with nothing pushed; `--mode insert` at
+the clip's end (no `--at`) does the same. Audio is
 silent during the held frame in `--mode insert` (there is no source audio
 for a frozen moment that didn't exist before). `--mode insert` drops a
 subtitle/data track rather than copy it with timestamps that no longer match
@@ -549,15 +550,24 @@ output; the result says so with `dropped_non_av_streams: true`.
 
 ### loop.py — repeat a clip
 ```
-loop.py INPUT --times N | --duration T [--boomerang] [-o OUT]
+loop.py INPUT --times N | --duration T [--crossfade S | --boomerang] [-o OUT]
 ```
 `--times` repeats the whole clip that many times back to back (2 =
 original + 1 repeat). `--duration` instead loops (and trims the last
 repeat) to hit an exact target length. For a background loop, an ambient
-bed, or filling a fixed slot length with a short clip. Does not smooth the
-loop point (no crossfade at the seam) -- a clip that doesn't already loop
-cleanly will show a visible cut/pop at each repeat, which is a property of
-the source material this tool cannot fix.
+bed, or filling a fixed slot length with a short clip. Without `--crossfade`
+the loop point is not smoothed: a clip that doesn't already loop cleanly
+shows a visible cut/pop at each repeat.
+`--crossfade S` makes the clip loop first: its last S seconds (whole frames)
+fade into its first S, picture and sound, so each seam continues the motion.
+One repeat is then the clip minus S (a 4 s clip with `--crossfade 1` repeats
+every 3 s), S may be at most half the clip, and `--times 1` writes one
+seamless loop file. The repeat is written losslessly to a temporary file
+first, so the output still has a single lossy encode.
+Every run except `--boomerang` measures the first seam of the written file
+(`seam`: the picture step across it against the typical step between
+neighbouring frames, and the sound level step in dB) and checks the length
+against the request (`expected_duration`, within 1.5 frames).
 `--boomerang` plays the clip forward, then backward (frames 0..N-1, then
 N-2..1, repeated), so any clip loops without a jump and neither turnaround
 frame is shown twice. `--times` then counts round trips (1 is allowed), and
@@ -650,15 +660,16 @@ silence.py INPUT --filler --words transcript.json [--filler-lang auto|en|ja|ko|z
            [--model MODEL] [--filler-list] [--max-cuts 400]
 ```
 Runs `silencedetect`, keeps `--margin` seconds of air around speech, drops
-gaps shorter than `--min-silence`, and re-encodes once: `select` for the picture
-(frame accurate), the same ranges through `ametadata` for the sound (not `aselect`, which passes every frame
-through on FFmpeg 8.0 and 8.0.1). `--list` prints silences, kept ranges and seconds removed
+gaps shorter than `--min-silence`, and re-encodes the kept ranges the way `cut.py --segments
+--accurate` does: both streams cut on the same frame times, so the sound never drifts from the
+picture at the cuts, and a sound that starts late keeps its offset. `--list` prints silences, kept ranges and seconds removed
 without rendering; `--edl` saves the kept ranges in `cut.py --segments` format
 so the user can edit the list by hand. Quiet rooms need `--threshold -40`
 to `-45`; noisy ones `-30`. Always tell the user how many seconds were removed.
 
 **Breaths and weak word endings.** `--margin` is the padding kept on each side of every cut
-(default 0.2 s since 2.22, 0.15 s before; 0.3 s for a speaker who trails off). `--speech-aware` keeps the short
+(default 0.2 s since 2.22, 0.15 s before; 0.3 s for a speaker who trails off). It is kept around
+silences only: a filler word's cut is the word plus `--filler-pad` (since 3.1.6). `--speech-aware` keeps the short
 breaths inside a sentence and cuts only at sentence-boundary pauses. A `--threshold` set too high
 (-25, say) counts a weak word ending as silence: the result then warns.
 
@@ -851,7 +862,11 @@ OTIO's adapters). Clips keep their in/out and speed (an M2 line, a `timeMap`, a
 `LinearTimeWarp`); `transition` becomes a cross dissolve centred on each cut, trimmed so the
 timeline is exactly as long as `join.py`'s crossfade would render it; `audio.music` is its own
 track; inline `chapters` are markers. Times take the render's own grammar (`"0:05"`,
-`hh:mm:ss:ff` at the source's fps), and the sequence is the project's `frame` sized by
+`hh:mm:ss:ff` at the source's fps; an `out` past a source's end ends at it, as the render
+cuts it, with a note; a chapter metadata.py would refuse is refused). Source positions count
+from each source's start timecode at its own frame rate (EDL source timecodes, drop-frame
+where the source's is; the FCPXML asset's `start`; OTIO's `available_range`), so a conform
+finds the frames (3.1.6). The sequence is the project's `frame` sized by
 fit.py's rule (`{aspect 16:9, width 1920}` is 1920x1080; an aspect alone takes the export
 preset's size when the preset has that aspect; an aspect fit.py refuses, such as `16/9`, is
 refused unless the project's own `fit.aspect` replaces it in the render). A clip of another
@@ -1234,10 +1249,18 @@ above the cap is clamped with a note, not refused, and both `jobs` and
   earlier has no such record and is processed again once, `entry_unverifiable`).
   A `.ffskill_cache.json` that does not parse is started empty with a
   `batch_cache_reset` warning and a line in `output_dir/.ffskill-audit.jsonl`.
-- With `--jobs > 1` each item gets its own work subdirectory
-  `<workdir>/<index>-<stem>/`, because step file names are stem-derived and two
-  sources sharing a stem would otherwise write over each other. `--jobs 1` (the
-  default) keeps the flat layout and is 1.16's path exactly.
+- Each item's intermediates go in a new directory of its own under the work
+  directory (`<workdir>/<index>-<random>/`), removed with them when the item
+  ends, whatever the outcome (3.1.6, #415): step file names are stem-derived, so
+  `clip.mp4` and `clip.mov` sharing a directory, or a rerun meeting an earlier
+  run's files, were refused as someone else's. A step that names no `{out}`
+  (`check.py`) passes its input on; when the last step writes nothing, the last
+  file written is delivered as the item's output, under its own extension (`.mp4`
+  for a video source) unless the recipe sets `ext`. A recipe in which no step names
+  `{out}` (a QC pass: `check.py`/`probe.py` on every file) writes nothing: each
+  row has `written: false` (`output` keeps its path string), a note says so, and `ok` follows the steps' exit codes.
+  Final names that differ only in case are a
+  collision (they are one file on macOS and Windows).
 - `--watch` composes: each pass is parallel, passes are sequential.
 
 ### caption.py --transcribe — optional local speech-to-text
@@ -1427,7 +1450,13 @@ look.py INPUT [--tiles 4x3] [--width 1280] [-o sheet.png]         # contact shee
 look.py INPUT --at 2.5 [--at 7] [-o basename]                     # single frames -> basename_2.500s.png
 look.py BEFORE --compare AFTER --at 4 [-o cmp.png]                # side-by-side frame
 look.py INPUT --safe tiktok [--at 3]                              # shade what the app's UI covers
+look.py INPUT --guides title,action,4:3 [--at 3]                  # broadcast safe-area outlines
 ```
+`--guides` draws safe-area outlines on the PNG only (look.py writes no video, so a guide never
+reaches a delivery): `action` 93 % and `title` 90 % of the frame (SMPTE ST 2046-1), and `4:3` the
+centre 4:3 window of a wider frame with SD's 90 % action and 80 % title safe inside it (refused on
+a frame that is not wider than 4:3). It combines with `--safe PLATFORM` (the app's own UI zones)
+and works on a contact sheet's tiles as on a single frame; the result's `guides` lists them.
 Outputs PNG. View it with the Read tool (or any image viewer) and judge the
 frame like an editor would. Use `--compare` to show before/after to the user. `--safe NAME` (1.14) shades the zones that
 destination's own UI covers -- TikTok's description block and like column, the Reels/Shorts
@@ -1868,7 +1897,16 @@ Run `loudness.py` after this for final levels.
 ### loudness.py — EBU R128 normalisation
 ```
 loudness.py INPUT [-I -14] [--tp -1] [--lra 11] [--measure-only] [-o OUT]
+loudness.py INPUT --versions=streaming,ebu-r128,broadcast-jp[,-16/-1.5] [--lra 11]
 ```
+`--versions` writes one file per target from the one master, each a full
+two-pass normalisation measured after: `streaming` (-14 LUFS / -1 dBTP),
+`ebu-r128` (-23 / -1), `broadcast-jp` (-24 LKFS / -1, ARIB TR-B32), or any
+`LUFS/TP` pair (write `--versions=...` when the list starts with a `-`). Files are `<name>_loudnorm_<target>.<ext>` (`-o` is refused);
+the result's `versions` lists each target, file and measurement, its
+verification steps carry a `version` key, and `verified` holds only when every
+version met its own target. An empty list (`--versions=`) is refused, and so is a `--plan` path
+that is one of the version files.
 `--lra N` is the loudness-range target in LU (default 11): lower it to squeeze a
 wide-dynamic mix into a phone speaker, raise it to leave a film mix alone.
 `--json` reports the measured range on both sides — `measured.input_lra` for the
@@ -1889,11 +1927,31 @@ integrated loudness ended more than 1 LU from the target because of it.
 
 ### export.py — delivery presets
 ```
-export.py INPUT --preset youtube|youtube4k|reels|tiktok|shorts|linkedin|facebook|x|youtube-hdr|youtube-av1|prores|h265|gif|copy
+export.py INPUT --preset youtube|youtube4k|reels|tiktok|shorts|linkedin|facebook|x|youtube-hdr|youtube-av1|prores|dnxhr-lb|dnxhr-sq|dnxhr-hq|dnxhr-hqx|dnxhr-444|prores4444|prores4444xq|qtrle|vp9-alpha|hap-alpha|key-fill|h265|gif|copy
                 [--fit pad|crop] [--no-scale] [--allow-long] [--crf N | --max-mb MB] [--normalize] [-o OUT]
 export.py INPUT --preset copy --repair [-o OUT]
 export.py --list
 ```
+Editing masters (`prores`, `dnxhr-lb/sq/hq/hqx/444`, and the alpha presets) keep the source's size,
+rate and colour tags and read the written codec and profile back (`codec` verification step).
+The alpha presets `prores4444`, `prores4444xq` (16-bit alpha), `qtrle`, `vp9-alpha` (WebM, Opus)
+and `hap-alpha` (an ffmpeg built with snappy; width and height multiples of 4) refuse a source
+without alpha, take `--alpha-mode straight|premultiplied` (default straight, reported as
+`alpha_mode`), and compare the mean alpha of each written frame with the source's, frame by frame
+on 64x36 copies, each within 2 of 255 (a region smaller than the copy's pixels can lose its alpha
+unseen; `alpha` step; a different frame count falls back to the mean and the most transparent frame,
+`comparison.paired: false`). A VP9 source is decoded with libvpx-vp9 (the
+native decoder drops the alpha); a dry run decides from the pixel format and a VP9 stream's
+`alpha_mode` tag without decoding. Under `--hw` these presets stay on the CPU (VideoToolbox's ProRes
+is 422 HQ, with no alpha), and a note says so. PNG/EXR image sequences are not written by `export.py`.
+`--preset key-fill` writes a switcher's key/fill pair from an alpha source in one run: the fill
+(`-o`, the colour; `--alpha-mode premultiplied` premultiplies it) and the key (`<out stem>_key.mov`,
+the alpha as a luma matte: alpha 255 is video white, 0 black), both ProRes 422 HQ with the source's
+start timecode. It checks both have the same size, frame count, rate and video length (`key_fill_pair`)
+and the key's level against the source's alpha over every frame (`key_level`), and reports both
+SHA-256 hashes (`fill_sha256`, `key.sha256`). Both paths are guarded like `-o` (not the input, not
+an existing file without `--overwrite`, written through a temp file); the source's subtitle/data
+streams are not written (`non_av_streams.dropped`, `reason: key_fill`); `--max-mb` is refused.
 `--repair` (2.24, `--preset copy` only) remuxes a damaged file: timestamps are regenerated
 (`-fflags +genpts`), packets flagged corrupt are dropped (`+discardcorrupt`), demuxing goes on past
 errors (`-err_detect ignore_err`) and negative timestamps are shifted to zero. The input is read,

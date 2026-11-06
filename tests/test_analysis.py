@@ -7,6 +7,7 @@
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _fixtures import MediaFixtures, OUT, SCRIPTS, TONES, _is_faststart, _no_fontconfig, png_size, script, sh  # noqa: E402
+from _fixtures import MediaFixtures, OUT, SCRIPTS, TONES, _is_faststart, _no_fontconfig, png_size, sar_clip, script, sh, tiny_clip  # noqa: E402
+from _fixtures import make_tones_take  # noqa: E402
 from _common import default_font_file, font_for_script, probe  # noqa: E402
 import importlib  # noqa: E402
 content_probe = importlib.import_module("_common.probe")  # the module: `_common.probe` is also a function
@@ -61,6 +63,15 @@ class AnalysisTests(MediaFixtures):
                          {"value": "01:00:00.00", "drop_frame": True, "source": "format"}, "a malformed tag is skipped")
         self.assertEqual(pick([], {"tags": {"timecode": "02:00:00:00"}}, {"index": 0, "tags": {"timecode": "01:99:99:00"}})["source"],
                          "format", "minutes and seconds above 59 are not a timecode")
+        # #427 review: a frames field the picture's rate cannot reach is skipped, and a tmcd
+        # track's valid tag is used instead of reading the file as having no timecode
+        v25 = {"index": 0, "r_frame_rate": "25/1", "tags": {"timecode": "01:00:00:29"}}
+        tmcd1 = {"index": 2, "codec_type": "data", "codec_tag_string": "tmcd", "tags": {"timecode": "01:00:00:00"}}
+        self.assertEqual(pick([tmcd1], {}, v25)["value"], "01:00:00:00")
+        self.assertIsNone(pick([], {}, v25)["value"])
+        self.assertEqual(pick([], {}, dict(v25, r_frame_rate="30000/1001"))["value"], "01:00:00:29")
+        # the rate probe()'s fps uses: avg_frame_rate first (25 here, though r_frame_rate says 50)
+        self.assertEqual(pick([tmcd1], {}, dict(v25, avg_frame_rate="25/1", r_frame_rate="50/1"))["value"], "01:00:00:00")
 
     def test_probe_accepts_common_flags(self):
         out = script("probe.py", self.src, "--json", "--field", "duration").stdout.strip()
@@ -193,6 +204,20 @@ class AnalysisTests(MediaFixtures):
         data = json.loads(script("sync.py", self.src, same, "--json").stdout)
         self.assertAlmostEqual(data["offset_seconds"], 0.0, delta=5e-4)
         self.assertEqual(data["meaning"], "second starts together with the reference")
+
+    def test_a_late_sound_is_measured_and_placed_on_its_files_clock(self):
+        """#409: decode_pcm_mono did not pad a sound that starts after its file's start, so a take
+        whose clock starts 1.0 s into the reference and whose sound starts 0.3 s after its picture
+        measured +1.3 s (sample 0 taken for the file's 0), and --replace-audio placed the sound that
+        far off. The offset is between the files' clocks, and the written sound keeps it."""
+        ref = make_tones_take(OUT / "sync_clock_ref.mp4", dur=8)
+        take = make_tones_take(OUT / "sync_clock_take.mp4", start=1.0, audio_late=0.3, dur=7)
+        data = json.loads(script("sync.py", ref, take, "--json").stdout)
+        self.assertAlmostEqual(data["offset_seconds"], 1.0, delta=0.01, msg=data)
+        out = OUT / "sync_clock_replaced.mp4"
+        script("sync.py", ref, take, "--replace-audio", "-o", out)
+        again = json.loads(script("sync.py", ref, out, "--json").stdout)
+        self.assertAlmostEqual(again["offset_seconds"], 0.0, delta=0.01, msg=again)
 
     def test_sync_replace_audio_stream_copy_writes_faststart_mp4(self):
         """Same shape as #275/#277: --replace-audio stream-copies the reference's video with
@@ -799,7 +824,10 @@ class AnalysisTests(MediaFixtures):
         # a per-step timeout is reported per step, never raised
         data = json.loads(script("verify.py", self.src, "--quick", "--timeout", "0.01", "--json", expect_fail=True).stdout)
         self.assertEqual((data["status"], data["error"]["kind"]), ("failed", "verification"))
-        timed_out = [s for f in data["files"] for s in f["steps"] if s["error"].startswith("timeout after")]
+        # verify's own step limit, or (since #415 bounds a child's ffprobe by --timeout too) the
+        # child's own timeout: either way a step row of kind timeout
+        timed_out = [s for f in data["files"] for s in f["steps"]
+                     if s["error"].startswith("timeout after") or s.get("kind") == "timeout"]
         self.assertTrue(timed_out, data)
         self.assertEqual(data["failed"], len(timed_out))
         # 0 means no limit here as on every other tool; it timed every step out at 0 s before 2.17.4
@@ -979,6 +1007,45 @@ class AnalysisTests(MediaFixtures):
         self.assertTrue(cmd, doc["commands"])
         self.assertIn("y=ih*(1-0.22)", cmd[0])
         self.assertIn("x=iw*(1-0.14)", cmd[0])
+
+    def test_look_guides_outline_broadcast_safe_areas_on_the_preview_only(self):
+        """#423: --guides draws action (93 %), title (90 %) and the 4:3 centre cut on the PNG; the
+        frame's middle and its size are untouched, and a frame no wider than 4:3 refuses 4:3."""
+        plain, marked = OUT / "guides_plain.png", OUT / "guides_marked.png"
+        script("look.py", self.src, "--at", "2", "--no-timecode", "-o", plain, "--overwrite")
+        doc = json.loads(script("look.py", self.src, "--at", "2", "--no-timecode", "--guides", "title,action,4:3",
+                                "-o", marked, "--json", "--overwrite").stdout)
+        self.assertEqual(png_size(plain), png_size(marked))
+        self.assertNotEqual(plain.read_bytes(), marked.read_bytes())
+        self.assertEqual([g["guide"] for g in doc["guides"]], ["title", "action", "4:3"])
+        cmd = next(c for c in doc["commands"] if "drawbox" in c)
+        self.assertIn("x=iw*0.035:y=ih*0.035:w=iw*0.93:h=ih*0.93", cmd)
+        self.assertIn("x=iw*0.05:y=ih*0.05:w=iw*0.9:h=ih*0.9", cmd)
+        self.assertIn("w=ih*4/3:h=ih", cmd)
+        square = OUT / "guides_square.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x320:r=10:d=1",
+           "-c:v", "libx264", square)
+        proc = script("look.py", square, "--at", "0.5", "--guides", "4:3", "--json", expect_fail=True)
+        self.assertIn("4:3 centre cut", json.loads(proc.stdout)["error"]["message"])
+        # #430 review: under --compare the guides are drawn on each picture as scaled, before the pad
+        # that letterboxes it (a 2:1 clip beside 16:9 got guides from the padded height); the
+        # timecode is drawn after it
+        wide = OUT / "guides_wide.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x320:r=10:d=1",
+           "-c:v", "libx264", wide)
+        doc = json.loads(script("look.py", self.src, "--compare", wide, "--at", "0.5", "--guides", "title,4:3", "--json",
+                                "-o", OUT / "guides_compare_wide.png").stdout)
+        graph = next(c for c in doc["commands"] if "hstack" in c)
+        for branch in graph.split(";")[:2]:
+            self.assertLess(branch.rindex("drawbox"), branch.index("pad="), branch)
+            if "drawtext" in branch:  # a build without drawtext (Homebrew's) draws no stamp
+                self.assertLess(branch.index("pad="), branch.index("drawtext"), branch)
+        # #430 review: the guides are drawn on both pictures of --compare, so the second is checked too
+        proc = script("look.py", self.src, "--compare", square, "--at", "0.5", "--guides", "4:3", "--json",
+                      "-o", OUT / "guides_compare.png", expect_fail=True)
+        self.assertIn("--compare clip", json.loads(proc.stdout)["error"]["message"])
+        proc = script("look.py", square, "--at", "0.5", "--guides", "nope", "--json", expect_fail=True)
+        self.assertIn("--guides takes", json.loads(proc.stdout)["error"]["message"])
 
     def test_look_safe_compares_the_displayed_aspect_of_a_rotated_source(self):
         """A 1280x720 file tagged 90 degrees is already 9:16. --safe tiktok used to warn that
@@ -1388,6 +1455,101 @@ class BeatGridTests(unittest.TestCase):
             g = beat_grid(self._clicks(0.5), self.STEP)
             self.assertAlmostEqual(g["tempo_bpm"], 120.0, delta=1.0)
             self.assertEqual(len(snap_points([1.0], g["beats"], 0.1)), 1)
+
+
+class GeometryAuditAnalysisTests(unittest.TestCase):
+    """Issue #411 (audit H) for look.py and scenes.py: the contact sheet's stamp on a source that
+    does not start at 0, scenes --sheet on a variable-frame-rate source, --compare keeping each
+    picture's aspect, and a non-square-pixel source looked at in square pixels. Every fixture is
+    a short lavfi clip built here."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not shutil.which("ffmpeg"):
+            if os.environ.get("CI"):
+                raise AssertionError("ffmpeg not on PATH -- in CI this is a broken install step")
+            raise unittest.SkipTest("ffmpeg not on PATH")
+        OUT.mkdir(parents=True, exist_ok=True)
+        cls.red43 = tiny_clip(OUT / "g411a_red43.mp4", "color=c=red:s=240x180:r=30", seconds=2)
+        cls.blue169 = tiny_clip(OUT / "g411a_blue169.mp4", "color=c=blue:s=320x180:r=30", seconds=2)
+        cls.sar = sar_clip(OUT / "g411a_sar.mp4", seconds=2)
+        # an MPEG-TS starts its timeline at 1.4 s
+        cls.ts = OUT / "g411a.ts"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30",
+           "-f", "lavfi", "-i", "sine=f=440:sample_rate=48000", "-t", "3", "-c:v", "libx264", "-preset", "ultrafast",
+           "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "mpegts", cls.ts)
+        # VFR: red 2 s at 5 fps, blue 1 s at 30 fps, green 2 s at 5 fps (50 frames over 5 s, so
+        # start x average fps names frame 30 for the green scene's start at 3 s -- a blue frame)
+        parts = []
+        for i, (colour, rate, secs) in enumerate((("red", 5, 2), ("blue", 30, 1), ("green", 5, 2))):
+            part = OUT / f"g411a_vfr{i}.mp4"
+            sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+               "-i", f"color=c={colour}:s=320x180:r={rate}", "-t", str(secs), "-c:v", "libx264",
+               "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-video_track_timescale", "90000", part)
+            parts.append(part)
+        listing = OUT / "g411a_vfr.txt"
+        listing.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in parts), encoding="utf-8")
+        cls.vfr = OUT / "g411a_vfr.mp4"
+        sh("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
+           "-c", "copy", cls.vfr)
+
+    def _rgb(self, png, x, y):
+        proc = subprocess.run(["ffmpeg", "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                              stdout=subprocess.PIPE)
+        w = png_size(png)[0]
+        off = (y * w + x) * 3
+        return tuple(proc.stdout[off:off + 3])
+
+    def test_contact_sheet_stamps_count_from_the_file_start_on_mpeg_ts(self):
+        """An input -ss resets an MPEG-TS's timestamps differently from an MP4's, so the stamp
+        (pts + seek) came out one seek late on TS. The sheet now keeps the file's own timestamps
+        counted from its start (-copyts -start_at_zero) and stamps each frame's pts as it is.
+        The stamp is drawn text, so the test reads the pts the stamp is drawn from: the same
+        graph with showinfo in place of drawtext and tile."""
+        self.assertGreater(probe(str(self.ts))["start_time"], 1.0)
+        doc = json.loads(script("look.py", self.ts, "--tiles", "3x1", "-o", OUT / "g411a_ts_sheet.png",
+                                "--json").stdout)
+        argv = shlex.split(doc["commands"][-1])
+        vf = argv[argv.index("-vf") + 1]
+        stamp = re.search(r"drawtext=text='%\{pts\\:hms(?:\\:([0-9.]+))?\}'", vf)
+        self.assertIsNotNone(stamp, vf)
+        offset = float(stamp.group(1) or 0)
+        argv[argv.index("-vf") + 1] = vf.split(",scale=")[0] + ",showinfo"
+        argv[-1:] = ["-an", "-f", "null", "-"]  # the PNG the tool writes has no audio either
+        i = argv.index("-frames:v")
+        argv[i:i + 2] = []
+        argv = [a for a in argv if a not in ("-loglevel", "error")]
+        proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stamps = [float(t) + offset for t in re.findall(r"pts_time:([0-9.]+)", proc.stderr)]
+        # the tiles sample the middle of each third: about 0.5, 1.5 and 2.5 s from the file's start
+        self.assertEqual(len(stamps), 3, proc.stderr[-2000:])
+        for got, want in zip(stamps, (0.5, 1.5, 2.5)):
+            self.assertAlmostEqual(got, want, delta=0.1)
+
+    def test_compare_keeps_each_pictures_aspect(self):
+        """scale2ref stretched the first picture to the second's size: a 4:3 beside a 16:9 came
+        out 16:9. Both now sit in boxes as tall as the taller one, letterboxed."""
+        out = OUT / "g411a_compare.png"
+        script("look.py", self.red43, "--compare", self.blue169, "--at", "1", "--no-timecode", "-o", out)
+        self.assertEqual(png_size(out), (1280, 480))
+        top_of_blue = self._rgb(out, 960, 10)
+        self.assertLess(top_of_blue[2], 100, top_of_blue)  # the letterbox, not blue picture
+
+    def test_look_shows_a_non_square_pixel_source_at_its_display_aspect(self):
+        out = OUT / "g411a_sar_at.png"
+        script("look.py", self.sar, "--at", "1", "--no-timecode", "-o", out)
+        self.assertEqual(png_size(out), (1280, 720))
+
+    def test_scenes_sheet_picks_each_scene_start_by_time_on_vfr(self):
+        doc = json.loads(script("scenes.py", self.vfr, "--sheet", OUT / "g411a_vfr_sheet.png", "--no-timecode",
+                                "--json", "--overwrite").stdout)
+        starts = [s["start"] for s in doc["scenes"]]
+        self.assertEqual(len(starts), 3, starts)
+        self.assertAlmostEqual(starts[2], 3.0, delta=0.05)
+        tile_w = 1280 // 3 // 2 * 2
+        green = self._rgb(OUT / "g411a_vfr_sheet.png", 2 + 2 * (tile_w + 2) + tile_w // 2, 60)
+        self.assertGreater(green[1], 100, green)
+        self.assertLess(green[2], 80, green)
 
 
 if __name__ == "__main__":
